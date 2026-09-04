@@ -16,6 +16,10 @@ login:
   # Endpoint JSON usato dal sito stesso (scoperto da /js/services/auth.js).
   api_url: "https://www.fantacalcio.it/api/v1/User/login"
   page_url: "https://www.fantacalcio.it/login"
+  # Il login di www legge `?from=<url>` e, ad accesso avvenuto, ci porta li':
+  # e' il modo in cui il sito stesso passa una sessione alle pagine della lega.
+  # Usato come secondo tentativo, se compilare il form in loco non basta.
+  handoff_url: "https://www.fantacalcio.it/login?from={target}"
   # Il muro di login puo' comparire su domini diversi (www.fantacalcio.it
   # oppure leghe.fantacalcio.it/login?next=...), con markup diverso: i
   # candidati vanno dal piu' specifico al piu' generico.

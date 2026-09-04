@@ -101,3 +101,27 @@ class TestSelettoriLogin:
         assert login["password_input"][-1] == "input[type=password]"
         assert len(login["username_input"]) >= 3
         assert len(login["submit_button"]) >= 3
+
+
+class TestAggancioDalLoginDiWww:
+    """Il secondo tentativo di accesso, quando il form in loco non basta."""
+
+    def test_url_di_aggancio_ben_formato(self, selectors):
+        from urllib.parse import parse_qs, quote, urlparse
+
+        target = f"{LEAGUE}/view/competition/lineup"
+        handoff = selectors["login"]["handoff_url"].format(
+            target=quote(target, safe="")
+        )
+        parsed = urlparse(handoff)
+        assert parsed.netloc == "www.fantacalcio.it"
+        # Il target deve arrivare intero: se la codifica si perde, il sito
+        # riporta l'utente altrove e il secondo tentativo non serve a nulla.
+        assert parse_qs(parsed.query)["from"] == [target]
+
+    def test_e_una_pagina_di_login(self, selectors):
+        """Se non lo fosse, `_login_via_handoff` non proverebbe a compilarlo."""
+        from urllib.parse import quote
+
+        handoff = selectors["login"]["handoff_url"].format(target=quote(LEAGUE, safe=""))
+        assert is_login_url(handoff) is True

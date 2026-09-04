@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -217,29 +217,60 @@ class LeagueClient:
         self._goto(self._page_url("home"))
         log.info("sessione valida su %s", self.page.url)
 
-    def _goto(self, url: str, *, allow_login: bool = True) -> None:
+    def _goto(self, url: str) -> None:
         """Naviga, e se il sito rimanda al login lo attraversa e riprova.
 
         Tutte le navigazioni passano di qui: il rimbalzo sul login puo'
-        avvenire su qualunque pagina, non solo alla prima.
+        avvenire su qualunque pagina, non solo alla prima. Ci sono due modi
+        di attraversarlo, provati in quest'ordine perche' il primo e' diretto
+        e il secondo dipende da un comportamento del sito:
+
+        1. compilare il form li' dove il sito ci ha portati;
+        2. passare dal login di `www` con `?from=<pagina>`, che quel login usa
+           per riportare l'utente dov'era diretto — e' il modo in cui il sito
+           stesso passa una sessione alle pagine della lega.
         """
         self.page.goto(url, wait_until="networkidle")
         if not is_login_url(self.page.url):
             return
 
-        if not allow_login:
-            self.save_artifacts("muro-di-login")
-            raise LeagueError(
-                f"{url} rimanda ancora al login ({self.page.url}) anche dopo "
-                "l'autenticazione. Le credenziali sono valide (l'API le accetta), "
-                "quindi il problema e' la sessione su leghe.fantacalcio.it: "
-                "lancia `fantabot discover`, che riporta su quali domini sono "
-                "finiti i cookie."
-            )
+        cfg = self.selectors["login"]
 
         log.info("rimbalzo sul login (%s): compilo il form", self.page.url)
-        self._login_via_form(self.selectors["login"])
-        self._goto(url, allow_login=False)
+        self._login_via_form(cfg)
+        if self._reaches(url):
+            return
+
+        log.info("ancora sul login: provo l'aggancio dal login di www")
+        self._login_via_handoff(cfg, url)
+        if self._reaches(url):
+            return
+
+        self.save_artifacts("muro-di-login")
+        raise LeagueError(
+            f"{url} rimanda ancora al login ({self.page.url}) dopo entrambi i "
+            "tentativi di accesso. Le credenziali sono valide (l'API le accetta), "
+            "quindi il problema e' la sessione su leghe.fantacalcio.it: lancia "
+            "`fantabot discover`, che riporta i domini dei cookie e la struttura "
+            "del form di login."
+        )
+
+    def _reaches(self, url: str) -> bool:
+        """True se `url` si apre senza essere rimbalzati sul login."""
+        self.page.goto(url, wait_until="networkidle")
+        return not is_login_url(self.page.url)
+
+    def _login_via_handoff(self, cfg: dict[str, Any], target: str) -> None:
+        """Accede dal login di `www` chiedendogli di tornare su `target`."""
+        template = cfg.get("handoff_url")
+        if not template:
+            return
+        handoff = template.format(target=quote(target, safe=""))
+        self.page.goto(handoff, wait_until="networkidle")
+        if is_login_url(self.page.url):
+            # Se la sessione su www e' gia' valida il sito rimanda da solo a
+            # `target` e qui non ci fermiamo nemmeno.
+            self._login_via_form(cfg)
 
     def _login_via_form(self, cfg: dict[str, Any]) -> None:
         """Compila il form di login **della pagina corrente**.
