@@ -199,16 +199,30 @@ def _cmd_discover(cfg: Config, secrets: Secrets, args) -> int:
         headless=not args.headful,
         artifacts_dir=None,  # nessun HTML grezzo: solo il riassunto
     ) as lega:
-        lega.login()
+        # Il login puo' fallire: e' proprio quando serve di piu' sapere come
+        # sono fatte le pagine. Registriamo l'errore e mappiamo lo stesso,
+        # anche solo la pagina di login su cui siamo rimasti.
+        login_error: str | None = None
+        try:
+            lega.login()
+        except Exception as exc:  # noqa: BLE001 - discover non deve arrendersi
+            login_error = f"{type(exc).__name__}: {exc}"
+            log.warning("login fallito, mappo comunque quello che si vede: %s", exc)
+
         summaries = lega.discover()
         cookies = lega.cookie_domains()
 
     out = cfg.output_dir
     out.mkdir(parents=True, exist_ok=True)
     report = out / "discovery.md"
-    report.write_text(to_markdown(summaries, cookies=cookies), encoding="utf-8")
+    report.write_text(
+        to_markdown(summaries, cookies=cookies, login_error=login_error),
+        encoding="utf-8",
+    )
 
     print(f"Report scritto in {report}")
+    if login_error:
+        print(f"ATTENZIONE: il login e' fallito ({login_error})")
     competitions = competition_ids(summaries)
     rosters = roster_ids(summaries)
     if competitions:

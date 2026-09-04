@@ -41,6 +41,21 @@ class LinkInfo:
 
 
 @dataclass
+class FormInfo:
+    """Un form con i suoi campi e i suoi bottoni.
+
+    Serve al caso concreto della pagina di login: sapere *com'e' fatto* il
+    bottone di invio (spesso un `<button>` senza `type`, che i selettori per
+    attributo non trovano) evita un altro giro di tentativi alla cieca.
+    """
+
+    selector: str
+    action: str = ""
+    fields: list[str] = field(default_factory=list)
+    buttons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ContainerInfo:
     """Un contenitore con figli tutti uguali: quasi sempre una lista/tabella."""
 
@@ -59,6 +74,7 @@ class PageSummary:
     links: list[LinkInfo] = field(default_factory=list)
     class_census: dict[str, int] = field(default_factory=dict)
     containers: list[ContainerInfo] = field(default_factory=list)
+    forms: list[FormInfo] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -90,6 +106,7 @@ def summarise(
     summary.links = _internal_links(tree, final_url or requested_url)[:max_links]
     summary.class_census = _class_census(tree, max_classes)
     summary.containers = _repeated_containers(tree)[:max_containers]
+    summary.forms = _forms(tree)
     return summary
 
 
@@ -115,6 +132,39 @@ def _internal_links(tree: HTMLParser, base_url: str) -> list[LinkInfo]:
             continue
         seen.add(path)
         out.append(LinkInfo(path=path, text=node.text(strip=True)[:60]))
+    return out
+
+
+def _forms(tree: HTMLParser, limit: int = 5) -> list[FormInfo]:
+    """Campi e bottoni di ogni form. Nessun valore, solo la struttura."""
+    out: list[FormInfo] = []
+    for node in tree.css("form")[:limit]:
+        info = FormInfo(
+            selector=_shape_key(node),
+            action=(node.attributes.get("action") or "").split("?")[0],
+        )
+        if node.attributes.get("id"):
+            info.selector = f"form#{node.attributes['id']}"
+
+        for field_node in node.css("input, select, textarea"):
+            attrs = field_node.attributes
+            parts = [str(field_node.tag)]
+            for key in ("type", "name", "id"):
+                if attrs.get(key):
+                    parts.append(f"{key}={attrs[key]}")
+            info.fields.append(" ".join(parts))
+
+        for button in node.css("button, input[type=submit], input[type=button], a[role=button]"):
+            attrs = button.attributes
+            parts = [_shape_key(button)]
+            # Il `type` mancante e' proprio l'informazione che interessa.
+            parts.append(f"type={attrs.get('type') or '<assente>'}")
+            text = button.text(strip=True)
+            if text:
+                parts.append(f"text={text[:30]!r}")
+            info.buttons.append(" ".join(parts))
+
+        out.append(info)
     return out
 
 
@@ -276,6 +326,7 @@ def _looks_like_login(url: str) -> bool:
 def to_markdown(
     summaries: list[PageSummary],
     cookies: list[tuple[str, str]] | None = None,
+    login_error: str | None = None,
 ) -> str:
     """Report leggibile, pensato per essere allegato come artifact."""
     lines = [
@@ -286,6 +337,16 @@ def to_markdown(
         "`config/selectors.yaml`. Non contiene HTML grezzo ne' screenshot.",
         "",
     ]
+
+    if login_error:
+        lines.extend([
+            "> **Il login e' fallito.** Quello che segue e' quanto si vede",
+            "> comunque: tipicamente la pagina di login stessa, la cui sezione",
+            "> *Form* dice come sono fatti i campi e il bottone di invio.",
+            "",
+            f"```\n{login_error}\n```",
+            "",
+        ])
 
     if cookies is not None:
         lines.extend(_session_section(cookies, summaries))
@@ -322,6 +383,18 @@ def to_markdown(
                 lines.append(f"- `{container.selector}` — {container.rows} righe")
                 for sample in container.samples:
                     lines.append(f"  - {' | '.join(sample)}" if sample else "  - (vuota)")
+            lines.append("")
+
+        if summary.forms:
+            lines.append("### Form")
+            lines.append("")
+            for form in summary.forms:
+                azione = f" (action `{form.action}`)" if form.action else ""
+                lines.append(f"- `{form.selector}`{azione}")
+                for campo in form.fields:
+                    lines.append(f"  - campo: `{campo}`")
+                for bottone in form.buttons:
+                    lines.append(f"  - bottone: `{bottone}`")
             lines.append("")
 
         if summary.class_census:

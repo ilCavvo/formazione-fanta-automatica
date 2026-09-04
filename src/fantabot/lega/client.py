@@ -251,12 +251,35 @@ class LeagueClient:
         """
         self._fill_first(cfg["username_input"], self._username)
         self._fill_first(cfg["password_input"], self._password)
-        self._click_first(cfg["submit_button"])
+        self._submit_login_form(cfg)
         try:
             self.page.wait_for_load_state("networkidle")
         except Exception:  # noqa: BLE001 - alcune pagine restano "occupate"
             log.debug("networkidle non raggiunto dopo il submit", exc_info=True)
         log.info("form di login inviato, ora su %s", self.page.url)
+
+    def _submit_login_form(self, cfg: dict[str, Any]) -> None:
+        """Invia il form di login.
+
+        Il bottone puo' non essere selezionabile per attributo: un
+        `<button>` dentro un form e' gia' di tipo submit anche senza
+        `type="submit"`, quindi `button[type=submit]` non lo trova. Se nessun
+        candidato matcha ripieghiamo su Invio nel campo password, che invia il
+        form qualunque sia il markup del bottone.
+        """
+        button = self._query_first(cfg.get("submit_button", []))
+        if button is not None:
+            button.click()
+            return
+
+        password = self._query_first(cfg.get("password_input", []))
+        if password is None:
+            raise LeagueError(
+                f"form di login non inviabile su {self.page.url}: ne' un bottone "
+                f"fra {cfg.get('submit_button')} ne' il campo password."
+            )
+        log.info("nessun bottone di submit trovato: invio il form con Invio")
+        password.press("Enter")
 
     def cookie_domains(self) -> list[tuple[str, str]]:
         """Coppie `(dominio, nome)` dei cookie di sessione. Mai i valori.
@@ -553,13 +576,17 @@ class LeagueClient:
     def _fill_first(self, candidates: list[str], value: str) -> None:
         locator = self._query_first(candidates)
         if locator is None:
-            raise LeagueError(f"campo non trovato (selettori provati: {candidates})")
+            raise LeagueError(
+                f"campo non trovato su {self.page.url} (selettori provati: {candidates})"
+            )
         locator.fill(value)
 
     def _click_first(self, candidates: list[str]) -> None:
         locator = self._query_first(candidates)
         if locator is None:
-            raise LeagueError(f"bottone non trovato (selettori provati: {candidates})")
+            raise LeagueError(
+                f"bottone non trovato su {self.page.url} (selettori provati: {candidates})"
+            )
         locator.click()
 
 
