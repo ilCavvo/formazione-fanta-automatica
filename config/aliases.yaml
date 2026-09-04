@@ -1,0 +1,28 @@
+# Alias manuali per i nomi che il fuzzy matching non riesce a unificare.
+#
+# Formato:
+#   players:
+#     "<nome canonico>": ["<variante>", "<variante>", ...]
+#   teams:
+#     "<nome canonico squadra>": ["<variante>", ...]
+#
+# Il confronto e' case-insensitive e ignora accenti e punteggiatura, quindi
+# "Bijlow J." combacia gia' da solo con "Bijlow": qui vanno solo i casi
+# davvero diversi (es. nomi doppi, traslitterazioni, omonimi).
+
+players:
+  # Esempi reali di divergenza tra fonti; aggiungine man mano che li incontri.
+  "Thuram M.": ["Marcus Thuram", "Thuram Marcus"]
+  "Thuram K.": ["Khephren Thuram", "Thuram Khephren", "Thuram-Ulien"]
+  "Dodo": ["Dodô", "Dodo'"]
+  "Sanchez A.": ["Alexis Sanchez", "Sanchez Alexis"]
+
+teams:
+  "Inter": ["Internazionale", "FC Internazionale", "Inter Milan"]
+  "Milan": ["AC Milan"]
+  "Roma": ["AS Roma"]
+  "Lazio": ["SS Lazio"]
+  "Juventus": ["Juve"]
+  "Verona": ["Hellas Verona", "Hellas"]
+  "Napoli": ["SSC Napoli"]
+  "Atalanta": ["Atalanta BC"]

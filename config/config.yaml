@@ -1,0 +1,215 @@
+# ============================================================================
+# fantabot - configurazione
+# Tutte le regole di formazione sono qui: per cambiare comportamento NON serve
+# toccare il codice. Le credenziali NON stanno qui: arrivano dalle env var
+# (GitHub Actions Secrets). Vedi .env.example.
+# ============================================================================
+
+# --- Sicurezza / modalita' -------------------------------------------------
+run:
+  # Se true calcola la formazione e manda la notifica Telegram ma NON invia
+  # nulla al sito. Lascia true finche' non ti fidi dell'automazione.
+  # Override runtime: env var DRY_RUN=true|false, oppure --dry-run/--no-dry-run.
+  dry_run: true
+
+  # Cartella dove finiscono log e artefatti del run (caricati come artifact CI).
+  output_dir: "out"
+
+  # Salva su disco l'HTML grezzo di ogni pagina scaricata (utile per debug e
+  # per aggiornare i parser quando un sito cambia struttura).
+  save_raw_html: true
+
+# --- Comportamento "gentile" verso i siti sorgente --------------------------
+http:
+  user_agent: "fantabot/0.1 (+uso personale, non commerciale)"
+  # Secondi di attesa tra due richieste allo stesso host.
+  delay_between_requests_s: 2.0
+  timeout_s: 30
+  max_retries: 3
+  # Backoff esponenziale: attesa = backoff_base_s * 2**tentativo
+  backoff_base_s: 2.0
+  # Cache su disco delle risposte, in minuti (0 = disattivata).
+  # Utile nei run ravvicinati e per non ribattere sugli stessi siti.
+  cache_ttl_minutes: 10
+
+# --- Regolamento della lega -------------------------------------------------
+league:
+  # Lo slug e' il pezzo di URL: https://leghe.fantacalcio.it/<slug>/
+  # Puoi lasciarlo vuoto qui e passarlo con FANTACALCIO_LEAGUE_SLUG.
+  slug: ""
+
+  # "classic" oppure "mantra". Attualmente e' implementato "classic".
+  mode: "classic"
+
+  # Se true, all'avvio l'agente legge la pagina regolamento della lega e prova a
+  # dedurre moduli ammessi e modificatori, sovrascrivendo i valori qui sotto.
+  # Se la lettura fallisce, si usano i valori di questo file (nessun blocco).
+  autodetect_rules: true
+
+  # Moduli ammessi (difensori-centrocampisti-attaccanti, portiere implicito).
+  # Sono i moduli standard di Fantacalcio Classic.
+  allowed_modules:
+    - "3-4-3"
+    - "3-5-2"
+    - "4-3-3"
+    - "4-4-2"
+    - "4-5-1"
+    - "5-3-2"
+    - "5-4-1"
+
+  # Vincoli di reparto (ridondanti rispetto ai moduli, ma servono da guardia
+  # se un giorno aggiungi moduli a mano).
+  slots:
+    portieri: 1
+    difensori: { min: 3, max: 5 }
+    centrocampisti: { min: 3, max: 5 }
+    attaccanti: { min: 1, max: 3 }
+
+  # Panchina: quante riserve inviare, in ordine di subentro.
+  bench_size: 14
+
+  modifiers:
+    # Modificatore difesa: se attivo conviene schierare 4 (o 5) difensori.
+    # Con autodetect_rules: true questo valore puo' essere sovrascritto da
+    # quanto letto nel regolamento della lega.
+    modificatore_difesa: false
+    modificatore_portiere: false
+    modificatore_centrocampo: false
+    modificatore_attacco: false
+
+# --- Fonti delle probabili formazioni --------------------------------------
+sources:
+  # Il peso pesa il voto della fonte nel calcolo della maggioranza.
+  # enabled: false esclude la fonte senza toccare il codice.
+  fantacalcio_it:
+    enabled: true
+    weight: 1.0
+    # Questa fonte espone anche la percentuale di titolarita' (es. 90%, 60%).
+    url: "https://www.fantacalcio.it/probabili-formazioni-serie-a"
+  sky:
+    enabled: true
+    weight: 1.0
+    url: "https://sport.sky.it/calcio/serie-a/probabili-formazioni"
+  gazzetta:
+    enabled: true
+    weight: 1.0
+    # Gazzetta non pubblica una pagina strutturata di probabili: l'agente cerca
+    # l'articolo-guida della giornata e prova a estrarne le formazioni.
+    # Se non ci riesce la fonte viene marcata "non disponibile" e la
+    # maggioranza si calcola sulle fonti rimaste (vedi min_sources).
+    index_url: "https://www.gazzetta.it/calcio/fantanews/"
+
+  # Sotto questo numero di fonti effettivamente disponibili il run e' considerato
+  # inaffidabile: l'agente NON invia la formazione e manda un alert Telegram.
+  min_sources: 1
+
+  # Pagine di indisponibili (infortunati/squalificati). Chi compare qui viene
+  # escluso dai titolari a prescindere dalle probabili.
+  unavailability:
+    enabled: true
+    infortunati_url: "https://www.fantacalcio.it/infortunati-serie-a"
+    squalificati_url: "https://www.fantacalcio.it/squalificati-e-diffidati-campionato-serie-a"
+
+# --- Aggregazione delle probabili ------------------------------------------
+aggregation:
+  # Come si trasforma il verdetto di una fonte in un voto:
+  #   starter -> 1.0, doubt -> 0.5, bench/assente -> 0.0
+  # Il giocatore e' TITOLARE se la media pesata dei voti supera questa soglia.
+  starter_threshold: 0.60
+  # Sotto starter_threshold ma sopra doubt_threshold => DUBBIO.
+  doubt_threshold: 0.34
+
+  # Fuzzy matching dei nomi tra fonti diverse (Sky scrive "Bijlow J.",
+  # Fantacalcio.it scrive "Bijlow").
+  matching:
+    min_score: 86          # 0-100, soglia rapidfuzz per accettare un match
+    require_same_team: true # due omonimi di squadre diverse non si confondono
+    alias_file: "config/aliases.yaml"
+
+  # Come sciogliere un pareggio secco (es. 1 fonte titolare, 1 panchina, 1 assente).
+  # Vengono applicati in ordine, il primo criterio disponibile decide.
+  tiebreakers:
+    - "probabilita_media"   # percentuale media di titolarita' (solo fantacalcio.it)
+    - "titolarita_recente"  # presenze nelle ultime giornate, se disponibili
+    - "fantamedia"          # fantamedia stagionale, se disponibile
+    - "ordine_rosa"         # ordine in cui i giocatori compaiono nella tua rosa
+
+# --- Logica di scelta della formazione --------------------------------------
+lineup:
+  # Punteggio base per stato aggregato del giocatore.
+  scores:
+    starter: 100.0
+    doubt: 45.0
+    bench: 8.0
+    unknown: 25.0        # nessuna fonte lo nomina
+    out: -1000.0         # infortunato/squalificato: mai titolare
+
+  weights:
+    # Quanto pesa la percentuale media di titolarita' (0-100 -> 0-1 * peso).
+    probabilita: 25.0
+    # Quanto pesa l'accordo tra le fonti (0-1 * peso).
+    consenso: 15.0
+    # Quanto pesa la fantamedia stagionale, se disponibile.
+    fantamedia: 8.0
+    # Spinta minima per rispettare l'ordine della tua rosa a parita' di tutto.
+    ordine_rosa: 0.5
+
+  penalties:
+    # Malus se la squadra del giocatore non gioca in questa giornata (riposo,
+    # rinvio) o se non risulta nelle probabili di nessuna fonte.
+    squadra_non_in_campo: 500.0
+    # Malus per ogni titolare "dubbio" schierato: scoraggia i moduli che
+    # costringono a rischiare.
+    per_dubbio_schierato: 12.0
+
+  module_bonus:
+    # Bonus applicato al punteggio totale del modulo. Serve a esprimere
+    # preferenze che non dipendono dai singoli giocatori.
+    # Attivo solo se league.modifiers.modificatore_difesa e' true.
+    difesa_a_4_con_modificatore: 60.0
+    difesa_a_5_con_modificatore: 25.0
+    # Preferenza generica (sempre attiva), utile per rompere la parita' tra
+    # moduli con punteggio quasi identico. Chiave = modulo.
+    preferenze:
+      "3-5-2": 2.0
+      "4-4-2": 1.5
+      "3-4-3": 1.0
+
+  # Se dopo la selezione restano meno di 11 titolari validi (rosa incompleta),
+  # completa comunque con i migliori disponibili invece di fallire.
+  allow_incomplete_lineup: true
+
+  # Ordina la panchina per ruolo secondo le regole della lega (di solito il
+  # subentro e' per ruolo). "per_ruolo_poi_punteggio" oppure "solo_punteggio".
+  bench_strategy: "per_ruolo_poi_punteggio"
+
+# --- Deadline della giornata ------------------------------------------------
+deadline:
+  # Fonte del calendario per calcolare l'ora del primo anticipo.
+  calendar_url: "https://www.fantacalcio.it/serie-a/calendario"
+  timezone: "Europe/Rome"
+  # Margine di sicurezza: l'agente considera scaduta la giornata gia' N minuti
+  # prima del primo fischio d'inizio.
+  safety_margin_minutes: 20
+  # Se true, prova anche a leggere la deadline dalla pagina formazione della
+  # lega dopo il login (piu' precisa: alcune leghe la spostano).
+  prefer_league_deadline: true
+  # Il run si ferma (senza errore) se mancano piu' di N ore alla deadline:
+  # evita di schierare su probabili ancora vuote.
+  skip_if_more_than_hours_before: 60
+
+# --- Notifiche Telegram -----------------------------------------------------
+telegram:
+  enabled: true
+  # Manda un messaggio anche quando e' tutto ok (false = solo errori).
+  notify_on_success: true
+  parse_mode: "HTML"
+  # Includi nel messaggio il dettaglio di come e' stato risolto ogni dubbio.
+  include_decisions: true
+  # Includi la lista completa della panchina.
+  include_bench: false
+
+# --- Logging ----------------------------------------------------------------
+logging:
+  level: "INFO"          # DEBUG per il massimo dettaglio
+  file: "fantabot.log"

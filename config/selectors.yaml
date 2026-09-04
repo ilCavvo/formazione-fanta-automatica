@@ -1,0 +1,57 @@
+# Selettori CSS delle pagine di leghe.fantacalcio.it.
+#
+# Perche' stanno in un file a parte: quelle pagine sono dietro login, quindi
+# non e' possibile verificarle senza credenziali. Se il sito cambia markup si
+# aggiusta qui, senza toccare il codice ne' rifare il deploy.
+#
+# Per scoprire i selettori corretti sul TUO account:
+#     fantabot inspect
+# scarica in out/inspect/ l'HTML e gli screenshot delle pagine rosa,
+# formazione e regolamento, gia' loggato.
+#
+# Ogni voce e' una LISTA di candidati provati in ordine: il primo che matcha
+# vince. Questo rende il codice tollerante ai piccoli restyling del sito.
+
+login:
+  # Endpoint JSON usato dal sito stesso (scoperto da /js/services/auth.js).
+  api_url: "https://www.fantacalcio.it/api/v1/User/login"
+  page_url: "https://www.fantacalcio.it/login"
+  username_input: ["#loginForm input[name=username]", "input[name=username]"]
+  password_input: ["#loginForm input[name=password]", "input[name=password]"]
+  submit_button: ["#loginForm button[type=submit]", "form button[type=submit]"]
+  # Presenza di uno di questi = sessione attiva.
+  logged_in_marker: [".display-username", "a[href*='logout']", ".user-menu"]
+
+pages:
+  # {slug} viene sostituito con lo slug della lega.
+  rosa: "https://leghe.fantacalcio.it/{slug}/rosa"
+  formazione: "https://leghe.fantacalcio.it/{slug}/formazione"
+  regolamento: "https://leghe.fantacalcio.it/{slug}/regolamento"
+
+rosa:
+  # Righe della tabella rosa.
+  row: ["table.player-list tbody tr", "#rosa tbody tr", "table tbody tr"]
+  role: ["td.role", ".player-role", "[class*=role]"]
+  name: ["td.player-name", ".player-name", "a[href*='/giocatore']"]
+  team: ["td.team", ".player-team", "[class*=team]"]
+  player_id_attr: ["data-player-id", "data-id", "id"]
+
+formazione:
+  # Testo con la scadenza, es. "Scadenza: 04/09/2026 20:45".
+  deadline_text: [".deadline", ".countdown", "[class*=scadenza]", "[class*=deadline]"]
+  # Selettore del contenitore di un giocatore schierabile.
+  player_slot: [".player-slot", ".formation-player", "li.player"]
+  # Select del modulo, se la lega lo fa scegliere esplicitamente.
+  module_select: ["select[name=modulo]", "select#modulo", "[class*=modulo] select"]
+  # Bottone di salvataggio formazione.
+  save_button:
+    - "button#salva-formazione"
+    - "button[type=submit].salva"
+    - "button:has-text('Salva formazione')"
+    - "button:has-text('Salva')"
+  # Conferma visibile dopo il salvataggio.
+  save_confirmation: [".alert-success", ".toast-success", "text=Formazione salvata"]
+
+regolamento:
+  # Contenitore del testo del regolamento, da cui dedurre i modificatori.
+  container: [".regolamento", "#regolamento", "main"]
