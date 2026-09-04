@@ -175,32 +175,24 @@ class TestRegolamento:
 class TestUrlPagineLega:
     """Gli URL in selectors.yaml sono quelli veri di leghe.fantacalcio.it."""
 
-    def _selectors(self):
-        from fantabot.lega.client import load_selectors
-        from tests.conftest import PROJECT_ROOT
-
-        return load_selectors(PROJECT_ROOT / "config" / "selectors.yaml")
-
-    def test_la_rosa_si_legge_dalla_pagina_formazione(self):
+    def test_la_rosa_si_legge_dalla_pagina_formazione(self, selectors):
         """Cosi' non serve sapere il proprio team_id: la pagina lo risolve."""
-        selectors = self._selectors()
         assert selectors["rosa"]["page"] == "formazione"
 
-    def test_url_formazione_senza_id_competizione(self):
+    def test_url_formazione_senza_id_competizione(self, selectors):
         """Senza id il sito reindirizza sulla competizione dell'utente loggato."""
-        url = self._selectors()["pages"]["formazione"]
+        url = selectors["pages"]["formazione"]
         assert url.endswith("/view/competition/lineup")
         assert "{slug}" in url
         assert "{team_id}" not in url
 
-    def test_url_rosa_usa_il_team_id(self):
-        url = self._selectors()["pages"]["rosa"]
-        assert "/view/rosters/{team_id}" in url
+    def test_url_rosa_usa_il_team_id(self, selectors):
+        assert "/view/rosters/{team_id}" in selectors["pages"]["rosa"]
 
-    def test_i_template_hanno_solo_segnaposto_noti(self):
+    def test_i_template_hanno_solo_segnaposto_noti(self, selectors):
         import re
 
         noti = {"slug", "team_id"}
-        for name, url in self._selectors()["pages"].items():
+        for name, url in selectors["pages"].items():
             trovati = set(re.findall(r"\{(\w+)\}", url))
             assert trovati <= noti, f"{name}: segnaposto sconosciuti {trovati - noti}"
