@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -38,6 +39,20 @@ DEFAULT_SELECTORS_PATH = Path("config/selectors.yaml")
 _DEADLINE_TEXT = re.compile(
     r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})[^\d]{1,12}(\d{1,2})[:.](\d{2})"
 )
+
+
+#: Frammenti di percorso che identificano una pagina di login.
+LOGIN_PATH_MARKERS = ("/login", "/accedi", "/signin", "/sign-in")
+
+
+def is_login_url(url: str) -> bool:
+    """True se l'URL e' una pagina di login (di qualunque dominio del sito).
+
+    Guardiamo solo il *percorso*: un `?next=/la/mia/pagina` non deve far
+    passare per login una pagina che login non e'.
+    """
+    path = urlparse(url or "").path.lower().rstrip("/")
+    return any(path == m or path.endswith(m) for m in LOGIN_PATH_MARKERS)
 
 
 class LeagueError(RuntimeError):
@@ -158,7 +173,19 @@ class LeagueClient:
     # -- login --------------------------------------------------------------
 
     def login(self) -> None:
-        """Prima via l'API JSON del sito, poi in fallback il form."""
+        """Autentica la sessione e **verifica** che valga sulla lega.
+
+        L'API JSON di `www.fantacalcio.it` e' la via veloce, ma da sola non
+        basta: il cookie che rilascia puo' non coprire `leghe.fantacalcio.it`,
+        che e' un'applicazione separata. Un login "riuscito" secondo l'API si
+        traduce allora in un rimbalzo silenzioso sulla pagina di login alla
+        prima navigazione — che e' esattamente il modo in cui questo e'
+        andato storto la prima volta.
+
+        Quindi: proviamo l'API, poi andiamo davvero su una pagina della lega.
+        Se troviamo il muro di login, lo attraversiamo compilando il form
+        (il sito stesso ci riporta indietro con il suo parametro `next`).
+        """
         cfg = self.selectors["login"]
 
         # Serve visitare il dominio prima della POST, altrimenti il cookie di
@@ -176,31 +203,128 @@ class LeagueClient:
             log.warning("login via API non riuscito (%s), provo con il form", exc)
             payload = {}
 
-        if payload.get("success"):
-            log.info("login riuscito via API")
-            return
-
         errors = payload.get("errors") or []
         if errors:
             messages = "; ".join(str(e.get("message", e)) for e in errors)
             raise LeagueError(f"login rifiutato: {messages}")
 
-        log.info("login via API non conclusivo, provo con il form")
+        if payload.get("success"):
+            log.info("login via API accettato, verifico la sessione sulla lega")
+        else:
+            log.info("login via API non conclusivo, mi affido al form")
+
+        # La verifica vera: una pagina della lega deve aprirsi senza rimbalzi.
+        self._goto(self._page_url("home"))
+        log.info("sessione valida su %s", self.page.url)
+
+    def _goto(self, url: str) -> None:
+        """Naviga, e se il sito rimanda al login lo attraversa e riprova.
+
+        Tutte le navigazioni passano di qui: il rimbalzo sul login puo'
+        avvenire su qualunque pagina, non solo alla prima. Ci sono due modi
+        di attraversarlo, provati in quest'ordine perche' il primo e' diretto
+        e il secondo dipende da un comportamento del sito:
+
+        1. compilare il form li' dove il sito ci ha portati;
+        2. passare dal login di `www` con `?from=<pagina>`, che quel login usa
+           per riportare l'utente dov'era diretto — e' il modo in cui il sito
+           stesso passa una sessione alle pagine della lega.
+        """
+        self.page.goto(url, wait_until="networkidle")
+        if not is_login_url(self.page.url):
+            return
+
+        cfg = self.selectors["login"]
+
+        log.info("rimbalzo sul login (%s): compilo il form", self.page.url)
         self._login_via_form(cfg)
+        if self._reaches(url):
+            return
+
+        log.info("ancora sul login: provo l'aggancio dal login di www")
+        self._login_via_handoff(cfg, url)
+        if self._reaches(url):
+            return
+
+        self.save_artifacts("muro-di-login")
+        raise LeagueError(
+            f"{url} rimanda ancora al login ({self.page.url}) dopo entrambi i "
+            "tentativi di accesso. Le credenziali sono valide (l'API le accetta), "
+            "quindi il problema e' la sessione su leghe.fantacalcio.it: lancia "
+            "`fantabot discover`, che riporta i domini dei cookie e la struttura "
+            "del form di login."
+        )
+
+    def _reaches(self, url: str) -> bool:
+        """True se `url` si apre senza essere rimbalzati sul login."""
+        self.page.goto(url, wait_until="networkidle")
+        return not is_login_url(self.page.url)
+
+    def _login_via_handoff(self, cfg: dict[str, Any], target: str) -> None:
+        """Accede dal login di `www` chiedendogli di tornare su `target`."""
+        template = cfg.get("handoff_url")
+        if not template:
+            return
+        handoff = template.format(target=quote(target, safe=""))
+        self.page.goto(handoff, wait_until="networkidle")
+        if is_login_url(self.page.url):
+            # Se la sessione su www e' gia' valida il sito rimanda da solo a
+            # `target` e qui non ci fermiamo nemmeno.
+            self._login_via_form(cfg)
 
     def _login_via_form(self, cfg: dict[str, Any]) -> None:
+        """Compila il form di login **della pagina corrente**.
+
+        Non naviga: il muro di login puo' comparire su domini diversi
+        (`www.fantacalcio.it/login`, `leghe.fantacalcio.it/login?next=...`) e
+        vogliamo autenticarci proprio dove il sito ci ha portati, cosi' e' lui
+        a riportarci a destinazione.
+        """
         self._fill_first(cfg["username_input"], self._username)
         self._fill_first(cfg["password_input"], self._password)
-        self._click_first(cfg["submit_button"])
-        self.page.wait_for_load_state("networkidle")
+        self._submit_login_form(cfg)
+        try:
+            self.page.wait_for_load_state("networkidle")
+        except Exception:  # noqa: BLE001 - alcune pagine restano "occupate"
+            log.debug("networkidle non raggiunto dopo il submit", exc_info=True)
+        log.info("form di login inviato, ora su %s", self.page.url)
 
-        if not self._any_visible(cfg.get("logged_in_marker", [])):
-            self.save_artifacts("login-fallito")
+    def _submit_login_form(self, cfg: dict[str, Any]) -> None:
+        """Invia il form di login.
+
+        Il bottone puo' non essere selezionabile per attributo: un
+        `<button>` dentro un form e' gia' di tipo submit anche senza
+        `type="submit"`, quindi `button[type=submit]` non lo trova. Se nessun
+        candidato matcha ripieghiamo su Invio nel campo password, che invia il
+        form qualunque sia il markup del bottone.
+        """
+        button = self._query_first(cfg.get("submit_button", []))
+        if button is not None:
+            button.click()
+            return
+
+        password = self._query_first(cfg.get("password_input", []))
+        if password is None:
             raise LeagueError(
-                "login fallito: nessun marcatore di sessione trovato dopo il submit. "
-                "Controlla credenziali o se il sito ha cambiato la pagina di login."
+                f"form di login non inviabile su {self.page.url}: ne' un bottone "
+                f"fra {cfg.get('submit_button')} ne' il campo password."
             )
-        log.info("login riuscito via form")
+        log.info("nessun bottone di submit trovato: invio il form con Invio")
+        password.press("Enter")
+
+    def cookie_domains(self) -> list[tuple[str, str]]:
+        """Coppie `(dominio, nome)` dei cookie di sessione. Mai i valori.
+
+        Serve a capire *dove* vale la sessione: e' l'informazione che mancava
+        per diagnosticare il rimbalzo sul login.
+        """
+        if self._context is None:
+            return []
+        try:
+            cookies = self._context.cookies()
+        except Exception:  # noqa: BLE001
+            return []
+        return sorted({(c.get("domain", ""), c.get("name", "")) for c in cookies})
 
     # -- lettura ------------------------------------------------------------
 
@@ -226,7 +350,7 @@ class LeagueClient:
         """
         cfg = self.selectors["rosa"]
         url = self._page_url(cfg.get("page", "formazione"))
-        self.page.goto(url, wait_until="networkidle")
+        self._goto(url)
 
         rows = self._query_all(cfg["row"])
         if not rows:
@@ -278,7 +402,7 @@ class LeagueClient:
         """
         url = self._page_url("regolamento")
         try:
-            self.page.goto(url, wait_until="networkidle")
+            self._goto(url)
         except Exception as exc:  # noqa: BLE001
             log.warning("regolamento non leggibile (%s): uso i valori di config.yaml", exc)
             return LeagueRules()
@@ -291,7 +415,7 @@ class LeagueClient:
         """Scadenza di schieramento letta dalla pagina formazione."""
         url = self._page_url("formazione")
         try:
-            self.page.goto(url, wait_until="networkidle")
+            self._goto(url)
         except Exception as exc:  # noqa: BLE001
             log.warning("pagina formazione non raggiungibile (%s)", exc)
             return None
@@ -314,7 +438,7 @@ class LeagueClient:
         messaggio Telegram.
         """
         url = self._page_url("formazione")
-        self.page.goto(url, wait_until="networkidle")
+        self._goto(url)
         cfg = self.selectors["formazione"]
 
         self._select_module(cfg, lineup.module)
@@ -415,7 +539,7 @@ class LeagueClient:
         saved: list[Path] = []
         for key in ("home", "formazione", "rosa", "regolamento"):
             try:
-                self.page.goto(self._page_url(key), wait_until="networkidle")
+                self._goto(self._page_url(key))
                 self.save_artifacts(key)
                 if self.artifacts_dir is not None:
                     saved.append(self.artifacts_dir / f"{key}.html")
@@ -441,7 +565,7 @@ class LeagueClient:
                 log.info("pagina %s saltata: %s", key, exc)
                 continue
             try:
-                self.page.goto(requested, wait_until="networkidle")
+                self._goto(requested)
                 summaries.append(
                     summarise(self.page.content(), key, requested, self.page.url)
                 )
@@ -483,13 +607,17 @@ class LeagueClient:
     def _fill_first(self, candidates: list[str], value: str) -> None:
         locator = self._query_first(candidates)
         if locator is None:
-            raise LeagueError(f"campo non trovato (selettori provati: {candidates})")
+            raise LeagueError(
+                f"campo non trovato su {self.page.url} (selettori provati: {candidates})"
+            )
         locator.fill(value)
 
     def _click_first(self, candidates: list[str]) -> None:
         locator = self._query_first(candidates)
         if locator is None:
-            raise LeagueError(f"bottone non trovato (selettori provati: {candidates})")
+            raise LeagueError(
+                f"bottone non trovato su {self.page.url} (selettori provati: {candidates})"
+            )
         locator.click()
 
 

@@ -145,3 +145,64 @@ class TestReport:
         report = to_markdown([failed])
         assert "regolamento" in report
         assert "Timeout" in report
+
+
+class TestForm:
+    """La sezione Form e' quella che diagnostica i fallimenti sul login."""
+
+    LOGIN_HTML = """
+    <form id="loginForm" action="/login?redirect=%2Fx">
+      <input name="username" type="text">
+      <input name="password" type="password">
+      <button class="btn btn-primary">Accedi</button>
+    </form>
+    """
+
+    def _form(self):
+        return summarise(self.LOGIN_HTML, "login",
+                         "https://leghe.fantacalcio.it/login").forms[0]
+
+    def test_identifica_il_form_per_id(self):
+        assert self._form().selector == "form#loginForm"
+
+    def test_elenca_i_campi_con_tipo_e_nome(self):
+        campi = self._form().fields
+        assert any("name=username" in c for c in campi)
+        assert any("type=password" in c for c in campi)
+
+    def test_segnala_il_type_mancante_sul_bottone(self):
+        """E' la causa esatta del fallimento: `button[type=submit]` non matcha
+        un <button> che il `type` non ce l'ha."""
+        bottoni = self._form().buttons
+        assert len(bottoni) == 1
+        assert "type=<assente>" in bottoni[0]
+        assert "Accedi" in bottoni[0]
+
+    def test_azione_senza_query_string(self):
+        assert self._form().action == "/login"
+
+    def test_il_form_finisce_nel_report(self):
+        s = summarise(self.LOGIN_HTML, "login", "https://leghe.fantacalcio.it/login")
+        report = to_markdown([s])
+        assert "### Form" in report
+        assert "type=<assente>" in report
+
+    def test_pagina_senza_form(self):
+        assert summarise("<html><body><p>ciao</p></body></html>", "x", "u").forms == []
+
+
+class TestLoginFallito:
+    """`discover` deve restare utile proprio quando il login non riesce."""
+
+    def test_il_report_riporta_lerrore_di_login(self):
+        report = to_markdown(
+            [PageSummary(name="home", requested_url="u", final_url="u")],
+            cookies=[],
+            login_error="LeagueError: bottone non trovato su https://x/login",
+        )
+        assert "login e' fallito" in report
+        assert "bottone non trovato" in report
+
+    def test_senza_errore_nessun_avviso(self):
+        report = to_markdown([PageSummary(name="home", requested_url="u", final_url="u")])
+        assert "login e' fallito" not in report
