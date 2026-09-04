@@ -29,6 +29,20 @@ def real_config() -> Config:
 
 
 @pytest.fixture
+def selectors() -> dict:
+    """I selettori versionati nel repo.
+
+    E' una fixture e non un import perche' `tests/` non e' un package: sotto lo
+    script `pytest` (quello che usa la CI) la radice del repo non finisce in
+    `sys.path`, quindi `from tests.conftest import ...` fallirebbe li' pur
+    funzionando con `python -m pytest`.
+    """
+    from fantabot.lega.client import load_selectors
+
+    return load_selectors(PROJECT_ROOT / "config" / "selectors.yaml")
+
+
+@pytest.fixture
 def config_factory(real_config):
     """Copia della config reale con alcune chiavi sovrascritte.
 

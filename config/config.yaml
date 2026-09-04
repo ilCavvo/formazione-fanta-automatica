@@ -38,6 +38,13 @@ league:
   # Puoi lasciarlo vuoto qui e passarlo con FANTACALCIO_LEAGUE_SLUG.
   slug: ""
 
+  # Identificativo della TUA squadra: il numero in fondo all'URL della rosa,
+  # https://leghe.fantacalcio.it/<slug>/view/rosters/<team_id>
+  # (ogni squadra della lega ne ha uno diverso).
+  # Puoi lasciarlo vuoto qui e passarlo con FANTACALCIO_TEAM_ID.
+  # Se non lo sai, lancia `fantabot discover`: lo trova da solo.
+  team_id: ""
+
   # "classic" oppure "mantra". Attualmente e' implementato "classic".
   mode: "classic"
 

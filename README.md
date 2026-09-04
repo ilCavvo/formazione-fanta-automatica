@@ -99,6 +99,7 @@ preso il suo posto.
 | `FANTACALCIO_USERNAME` | il tuo username su fantacalcio.it |
 | `FANTACALCIO_PASSWORD` | la tua password |
 | `FANTACALCIO_LEAGUE_SLUG` | il pezzo di URL della lega: `https://leghe.fantacalcio.it/<slug>/` |
+| `FANTACALCIO_TEAM_ID` | *(opzionale)* il numero in fondo all'URL della tua rosa. Non serve per schierare: la pagina formazione si risolve da sola sulla tua squadra |
 | `TELEGRAM_BOT_TOKEN` | *(opzionale)* token del bot (te lo da' [@BotFather](https://t.me/BotFather)) |
 | `TELEGRAM_CHAT_ID` | *(opzionale)* id della chat dove ricevere i messaggi |
 
@@ -149,7 +150,8 @@ fantabot deadline         # quando scade la prossima giornata
 | `fantabot run --force` | ignora i controlli sulla deadline | si |
 | `fantabot probabili` | solo scraping + aggregazione | no |
 | `fantabot deadline` | deadline della prossima giornata | no |
-| `fantabot inspect` | scarica le pagine della lega per tarare i selettori | si |
+| `fantabot discover` | mappa le pagine della lega, report sicuro da pubblicare | si |
+| `fantabot inspect` | HTML e screenshot della lega, **solo in locale** | si |
 | `fantabot notify-test` | messaggio di prova su Telegram | no |
 
 Flag globali: `--config`, `--log-level DEBUG`, `--dry-run` / `--no-dry-run`,
@@ -212,18 +214,51 @@ non blocca nulla: restano i valori del file.
 
 ## Il primo run: tarare i selettori della lega
 
-Le pagine `rosa`, `formazione` e `regolamento` stanno **dietro login**, quindi i
-loro selettori CSS non sono verificabili senza un account reale. Per questo
-stanno in `config/selectors.yaml` come **liste di candidati** provati in ordine,
-e c'e' un comando apposta:
+Le pagine della lega stanno **dietro login**, quindi i loro selettori CSS non
+sono verificabili senza un account reale. Per questo stanno in
+`config/selectors.yaml` come **liste di candidati** provati in ordine, e ci sono
+due comandi apposta.
+
+### `fantabot discover` — da usare per primo, anche da GitHub Actions
+
+```bash
+fantabot discover      # in locale
+```
+
+oppure, senza installare niente: **Actions → Schiera formazione → Run workflow →
+`command: discover`**.
+
+Fa login, visita le pagine note e scrive `out/discovery.md` con:
+
+- la **mappa dei link interni** della lega (da cui si ricavano gli URL veri);
+- gli **identificativi** trovati (id competizione, id delle rose);
+- i **contenitori con struttura ripetuta**, cioe' i candidati per la lista dei
+  giocatori, con qualche riga di esempio nella forma `classe = testo`;
+- il **censimento delle classi** CSS piu' frequenti.
+
+E' pensato per essere sicuro da allegare come artifact: niente HTML grezzo,
+niente screenshot, e le query string dei link vengono rimosse perche' possono
+contenere identificativi di sessione. Dal report si scrivono i selettori giusti
+senza toccare il codice.
+
+### `fantabot inspect` — solo in locale
 
 ```bash
 fantabot inspect
 ```
 
-Fa login e salva in `out/inspect/` l'HTML e uno screenshot a tutta pagina di
-ciascuna. Apri gli HTML, trova i selettori giusti e aggiornali in
-`config/selectors.yaml` — nessuna modifica al codice.
+Salva in `out/inspect/` l'HTML **grezzo** e uno screenshot a tutta pagina.
+Molto piu' dettagliato, ma e' materiale da pagina loggata: il workflow lo
+esclude apposta dagli artifact, quindi ha senso solo sulla tua macchina.
+
+### Dove sta la rosa
+
+Non in una pagina "rosa" separata: la legge dalla **pagina formazione**
+(`/{slug}/view/competition/lineup`). Quell'URL, senza id competizione,
+reindirizza da solo sulla competizione e sulla squadra dell'utente loggato —
+quindi non serve conoscere il proprio `team_id`, che ogni squadra della lega ha
+diverso. La sorgente resta configurabile con `rosa.page` in
+`config/selectors.yaml`.
 
 Le parti **pubbliche** (fonti delle probabili, indisponibili, calendario) sono
 invece gia' verificate sul markup reale e coperte da test con fixture HTML vere.
@@ -254,6 +289,7 @@ dell'ultimo minuto, e i run inutili costano pochi secondi.
 
 | Campo | Cosa fa |
 |---|---|
+| `command` | `run` schiera; `discover` mappa le pagine della lega e scrive `out/discovery.md` nell'artifact. Usa `discover` quando `run` fallisce leggendo la rosa |
 | `dry_run` | spuntato (default): calcola e notifica, non invia nulla. **Togli la spunta per schierare davvero**, senza toccare `config.yaml` |
 | `force` | ignora i controlli sulla deadline: schiera anche se mancano piu' di 60h o se la deadline e' gia' passata |
 | `log_level` | metti `DEBUG` quando stai debuggando: il log diventa molto piu' verboso |

@@ -100,6 +100,7 @@ class Runner:
             slug=slug,
             username=self.secrets.username or "",
             password=self.secrets.password or "",
+            team_id=self.cfg.team_id(self.secrets),
             selectors=load_selectors(),
             headless=self.headless,
             artifacts_dir=out_dir / "lega",
