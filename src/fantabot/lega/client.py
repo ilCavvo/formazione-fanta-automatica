@@ -41,6 +41,13 @@ _DEADLINE_TEXT = re.compile(
 )
 
 
+#: Attesa massima per il bottone del banner consensi.
+CONSENT_TIMEOUT_MS = 5_000
+
+#: Attesa massima di un click prima di ripiegare sull'evento DOM. Corta di
+#: proposito: se un overlay intercetta, aspettare 30s non cambia nulla.
+CLICK_TIMEOUT_MS = 8_000
+
 #: Frammenti di percorso che identificano una pagina di login.
 LOGIN_PATH_MARKERS = ("/login", "/accedi", "/signin", "/sign-in")
 
@@ -191,6 +198,7 @@ class LeagueClient:
         # Serve visitare il dominio prima della POST, altrimenti il cookie di
         # sessione non viene associato al contesto del browser.
         self.page.goto(cfg["page_url"], wait_until="domcontentloaded")
+        self._dismiss_consent()
 
         try:
             response = self._context.request.post(
@@ -230,7 +238,7 @@ class LeagueClient:
            per riportare l'utente dov'era diretto — e' il modo in cui il sito
            stesso passa una sessione alle pagine della lega.
         """
-        self.page.goto(url, wait_until="networkidle")
+        self._open(url)
         if not is_login_url(self.page.url):
             return
 
@@ -255,9 +263,70 @@ class LeagueClient:
             "del form di login."
         )
 
+    def _open(self, url: str) -> None:
+        """Apre una pagina e sgombra il banner dei consensi.
+
+        Il banner va tolto dopo *ogni* navigazione, non solo al login: e' un
+        overlay che intercetta i click, quindi bloccherebbe allo stesso modo il
+        salvataggio della formazione.
+        """
+        self.page.goto(url, wait_until="networkidle")
+        self._dismiss_consent()
+
+    def _dismiss_consent(self) -> None:
+        """Accetta il banner dei consensi, o lo rimuove dal DOM.
+
+        In headless il CMP resta sopra a tutto: Playwright trova l'elemento
+        giusto, lo dichiara "visible, enabled and stable", ma il click non
+        arriva mai perche' l'overlay lo intercetta — e si consumano 30s di
+        retry prima del timeout.
+        """
+        cfg = self.selectors.get("consent") or {}
+
+        for selector in cfg.get("accept_button", []):
+            try:
+                locator = self.page.locator(selector).first
+                if locator.count() == 0:
+                    continue
+                locator.click(timeout=CONSENT_TIMEOUT_MS)
+            except Exception:  # noqa: BLE001 - il banner puo' non esserci
+                continue
+            else:
+                log.info("banner consensi accettato (%s)", selector)
+                self.page.wait_for_timeout(300)
+                return
+
+        # Nessun bottone utilizzabile: togliamo l'overlay di mezzo.
+        for selector in cfg.get("container", []):
+            try:
+                removed = self.page.evaluate(
+                    "sel => { const n = document.querySelector(sel);"
+                    " if (!n) return false; n.remove(); return true; }",
+                    selector,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if removed:
+                log.info("banner consensi rimosso dal DOM (%s)", selector)
+                return
+
+    def _click(self, locator, what: str) -> None:
+        """Click resistente agli overlay.
+
+        Se il click reale non passa, ripieghiamo su un evento DOM sull'elemento:
+        non fa hit-testing, quindi nessun banner puo' intercettarlo.
+        """
+        try:
+            locator.click(timeout=CLICK_TIMEOUT_MS)
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.info("click su %s intercettato (%s): uso l'evento DOM",
+                     what, str(exc).splitlines()[0])
+        locator.evaluate("el => el.click()")
+
     def _reaches(self, url: str) -> bool:
         """True se `url` si apre senza essere rimbalzati sul login."""
-        self.page.goto(url, wait_until="networkidle")
+        self._open(url)
         return not is_login_url(self.page.url)
 
     def _login_via_handoff(self, cfg: dict[str, Any], target: str) -> None:
@@ -266,7 +335,7 @@ class LeagueClient:
         if not template:
             return
         handoff = template.format(target=quote(target, safe=""))
-        self.page.goto(handoff, wait_until="networkidle")
+        self._open(handoff)
         if is_login_url(self.page.url):
             # Se la sessione su www e' gia' valida il sito rimanda da solo a
             # `target` e qui non ci fermiamo nemmeno.
@@ -300,7 +369,7 @@ class LeagueClient:
         """
         button = self._query_first(cfg.get("submit_button", []))
         if button is not None:
-            button.click()
+            self._click(button, "bottone di login")
             return
 
         password = self._query_first(cfg.get("password_input", []))
@@ -466,7 +535,7 @@ class LeagueClient:
                 "bottone di salvataggio non trovato: aggiorna formazione.save_button "
                 "in config/selectors.yaml."
             )
-        button.click()
+        self._click(button, "bottone di salvataggio")
         self.page.wait_for_load_state("networkidle")
 
         confirmed = self._any_visible(cfg.get("save_confirmation", []))
@@ -504,7 +573,9 @@ class LeagueClient:
                 f"text=/{re.escape(name)}/i"
             ).first
             try:
-                locator.click(timeout=5_000)
+                # Anche qui il banner consensi intercetterebbe i click: `_click`
+                # ripiega sull'evento DOM se il click reale non passa.
+                self._click(locator, f"giocatore {name}")
                 placed += 1
             except Exception:  # noqa: BLE001
                 missing.append(name)
@@ -618,7 +689,7 @@ class LeagueClient:
             raise LeagueError(
                 f"bottone non trovato su {self.page.url} (selettori provati: {candidates})"
             )
-        locator.click()
+        self._click(locator, f"uno di {candidates}")
 
 
 # --------------------------------------------------------------------------
