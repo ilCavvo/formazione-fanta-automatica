@@ -74,14 +74,25 @@ jobs:
           FANTACALCIO_LEAGUE_SLUG: ${{ secrets.FANTACALCIO_LEAGUE_SLUG }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Sui run schedulati vale il valore di config/config.yaml.
+          # Sui run schedulati resta vuota e decide config/config.yaml.
           # Su workflow_dispatch decide la spunta nel form.
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || '' }}
+          # Serve la doppia condizione: `inputs.dry_run` da solo, quando lo
+          # deselezioni, vale `false` e l'espressione ripiegherebbe su stringa
+          # vuota, che il codice legge come "non impostata" -> tornerebbe al
+          # default di config.yaml, cioe' proprio il dry run che volevi togliere.
+          DRY_RUN: >-
+            ${{ github.event_name == 'workflow_dispatch'
+                && (inputs.dry_run && 'true' || 'false')
+                || '' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          LOG_LEVEL: ${{ inputs.log_level || 'INFO' }}
         run: |
-          fantabot \
-            --log-level "${{ inputs.log_level || 'INFO' }}" \
-            ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '--force' || '' }} \
-            run
+          args=(--log-level "$LOG_LEVEL")
+          if [ "$FORCE" = "true" ]; then
+            args+=(--force)
+          fi
+          echo "DRY_RUN=${DRY_RUN:-<da config.yaml>}  FORCE=$FORCE"
+          fantabot "${args[@]}" run
 
       - name: Carica log e artefatti di debug
         # ATTENZIONE: su una repo pubblica gli artifact sono scaricabili da

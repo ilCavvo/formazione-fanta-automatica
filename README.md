@@ -99,13 +99,31 @@ preso il suo posto.
 | `FANTACALCIO_USERNAME` | il tuo username su fantacalcio.it |
 | `FANTACALCIO_PASSWORD` | la tua password |
 | `FANTACALCIO_LEAGUE_SLUG` | il pezzo di URL della lega: `https://leghe.fantacalcio.it/<slug>/` |
-| `TELEGRAM_BOT_TOKEN` | token del bot (te lo da' [@BotFather](https://t.me/BotFather)) |
-| `TELEGRAM_CHAT_ID` | id della chat dove ricevere i messaggi |
+| `TELEGRAM_BOT_TOKEN` | *(opzionale)* token del bot (te lo da' [@BotFather](https://t.me/BotFather)) |
+| `TELEGRAM_CHAT_ID` | *(opzionale)* id della chat dove ricevere i messaggi |
 
 Per il `TELEGRAM_CHAT_ID`: scrivi un messaggio al tuo bot, poi apri
 `https://api.telegram.org/bot<TOKEN>/getUpdates` e leggi `message.chat.id`.
 
 Nessuno di questi valori va mai in un file del repo.
+
+### Telegram e' opzionale
+
+Senza i due secret Telegram l'agente **funziona lo stesso**: legge le fonti,
+calcola e schiera esattamente come prima. Cambia solo che il riepilogo non ti
+arriva sul telefono: viene scritto nel log del job (lo trovi per esteso, gia'
+formattato, cercando "messaggio che sarebbe stato inviato") e in
+`out/result.json`.
+
+Cosa perdi davvero: **l'avviso immediato quando qualcosa si rompe**. Se il login
+fallisce o il sito cambia struttura, con Telegram lo sai subito e fai in tempo a
+schierare a mano; senza, te ne accorgi solo aprendo la tab Actions. Un
+rimpiazzo parziale ce l'hai gratis: GitHub ti manda un'email quando un workflow
+schedulato fallisce (Settings → Notifications → Actions). Vale la pena
+controllare che sia attiva se decidi di non usare il bot.
+
+Per disattivarlo del tutto e togliere anche il warning nei log, metti
+`telegram.enabled: false` in `config/config.yaml`.
 
 ### 2. Locale (opzionale, per provare)
 
@@ -229,8 +247,27 @@ ha la precedenza. Poi decide da solo:
 Cosi' l'ultimo run utile prima del fischio cattura gli aggiornamenti
 dell'ultimo minuto, e i run inutili costano pochi secondi.
 
-Puoi anche lanciarlo a mano da **Actions → Schiera formazione → Run workflow**,
-scegliendo `dry_run` e `force`.
+### Lanciarlo a mano
+
+**Actions → Schiera formazione** (nella colonna di sinistra) **→ Run workflow**
+(bottone in alto a destra). Il form ha tre campi:
+
+| Campo | Cosa fa |
+|---|---|
+| `dry_run` | spuntato (default): calcola e notifica, non invia nulla. **Togli la spunta per schierare davvero**, senza toccare `config.yaml` |
+| `force` | ignora i controlli sulla deadline: schiera anche se mancano piu' di 60h o se la deadline e' gia' passata |
+| `log_level` | metti `DEBUG` quando stai debuggando: il log diventa molto piu' verboso |
+
+Due cose da sapere:
+
+- il bottone **Run workflow** compare solo se il workflow esiste sul branch di
+  default (`main`). Se non lo vedi, e' perche' la modifica al workflow e' ancora
+  su un branch non mergiato;
+- senza `force`, un run lanciato a mano in un momento "sbagliato" (giornata
+  lontana o gia' iniziata) finisce subito senza fare nulla, e te lo dice. Non e'
+  un errore: e' la protezione che evita di schierare su probabili non ancora
+  affidabili. Per una prova al volo in un giorno qualsiasi, spunta `force` e
+  lascia spuntato `dry_run`.
 
 ---
 

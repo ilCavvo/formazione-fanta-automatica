@@ -46,6 +46,23 @@ class TestConfig:
         monkeypatch.setenv("DRY_RUN", value)
         assert cfg.dry_run is True
 
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_env_var_vuota_ricade_sulla_config(self, config_factory, monkeypatch, value):
+        """Una DRY_RUN vuota non e' "disattiva": vuol dire "non impostata".
+
+        Il workflow deve quindi passare esplicitamente 'true'/'false'. Se si
+        limitasse a interpolare l'input booleano, deselezionare la spunta
+        produrrebbe stringa vuota e il run resterebbe in dry run, cioe'
+        l'opposto di quanto chiesto.
+        """
+        cfg = config_factory({"run.dry_run": True})
+        monkeypatch.setenv("DRY_RUN", value)
+        assert cfg.dry_run is True
+
+        cfg_no_dry = config_factory({"run.dry_run": False})
+        monkeypatch.setenv("DRY_RUN", value)
+        assert cfg_no_dry.dry_run is False
+
     def test_moduli_ammessi_sono_validi(self, real_config):
         """Ogni modulo in config deve schierare esattamente 11 titolari."""
         from fantabot.lineup import Module
