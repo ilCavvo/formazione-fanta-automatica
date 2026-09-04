@@ -251,6 +251,24 @@ Salva in `out/inspect/` l'HTML **grezzo** e uno screenshot a tutta pagina.
 Molto piu' dettagliato, ma e' materiale da pagina loggata: il workflow lo
 esclude apposta dagli artifact, quindi ha senso solo sulla tua macchina.
 
+### Se il run rimbalza sul login
+
+`www.fantacalcio.it` e `leghe.fantacalcio.it` sono due applicazioni diverse: un
+login accettato dalla prima **non** garantisce una sessione valida sulla
+seconda. Quando succede, il sito non da' errore — reindirizza silenziosamente a
+`leghe.fantacalcio.it/login?next=...`, e la pagina che si finisce per leggere
+non e' quella che si voleva.
+
+L'agente lo gestisce da solo: ogni navigazione controlla di non essere finita su
+una pagina di login e, se lo e', compila il form li' dove il sito l'ha portata
+(e' il sito stesso a riportarci a destinazione col suo parametro `next`). Il
+login iniziale non si fida della risposta dell'API: apre una pagina della lega e
+verifica.
+
+Se il rimbalzo persiste, `fantabot discover` scrive nel report una sezione
+**Sessione** con i domini su cui sono finiti i cookie e le pagine che hanno
+rimbalzato — solo dominio e nome, mai i valori, che sono credenziali.
+
 ### Dove sta la rosa
 
 Non in una pagina "rosa" separata: la legge dalla **pagina formazione**

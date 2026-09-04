@@ -201,11 +201,12 @@ def _cmd_discover(cfg: Config, secrets: Secrets, args) -> int:
     ) as lega:
         lega.login()
         summaries = lega.discover()
+        cookies = lega.cookie_domains()
 
     out = cfg.output_dir
     out.mkdir(parents=True, exist_ok=True)
     report = out / "discovery.md"
-    report.write_text(to_markdown(summaries), encoding="utf-8")
+    report.write_text(to_markdown(summaries, cookies=cookies), encoding="utf-8")
 
     print(f"Report scritto in {report}")
     competitions = competition_ids(summaries)

@@ -231,7 +231,52 @@ def _ids(summaries: list[PageSummary], pattern: re.Pattern[str]) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-def to_markdown(summaries: list[PageSummary]) -> str:
+def _session_section(
+    cookies: list[tuple[str, str]], summaries: list[PageSummary]
+) -> list[str]:
+    """Su quali domini vale la sessione, e quali pagine rimbalzano al login.
+
+    E' la sezione diagnostica: `www.fantacalcio.it` e `leghe.fantacalcio.it`
+    sono applicazioni distinte, quindi un login accettato dalla prima non
+    implica una sessione valida sulla seconda. Riportiamo solo dominio e nome
+    dei cookie: mai i valori, che sono a tutti gli effetti credenziali.
+    """
+    lines = ["## Sessione", ""]
+
+    by_domain: dict[str, list[str]] = {}
+    for domain, name in cookies:
+        by_domain.setdefault(domain, []).append(name)
+    if by_domain:
+        lines.append("Cookie presenti (solo dominio e nome, mai i valori):")
+        lines.append("")
+        for domain in sorted(by_domain):
+            lines.append(f"- `{domain}`: {', '.join(sorted(by_domain[domain]))}")
+    else:
+        lines.append("Nessun cookie nel contesto: la sessione non e' partita.")
+    lines.append("")
+
+    walled = [s for s in summaries if _looks_like_login(s.final_url)]
+    if walled:
+        lines.append("**Pagine rimbalzate sul login:**")
+        lines.append("")
+        for summary in walled:
+            lines.append(f"- {summary.name} -> `{summary.final_url}`")
+        lines.append("")
+
+    return lines
+
+
+def _looks_like_login(url: str) -> bool:
+    from urllib.parse import urlparse as _urlparse
+
+    path = _urlparse(url or "").path.lower().rstrip("/")
+    return any(path == m or path.endswith(m) for m in ("/login", "/accedi", "/signin"))
+
+
+def to_markdown(
+    summaries: list[PageSummary],
+    cookies: list[tuple[str, str]] | None = None,
+) -> str:
     """Report leggibile, pensato per essere allegato come artifact."""
     lines = [
         "# fantabot — mappa delle pagine della lega",
@@ -241,6 +286,9 @@ def to_markdown(summaries: list[PageSummary]) -> str:
         "`config/selectors.yaml`. Non contiene HTML grezzo ne' screenshot.",
         "",
     ]
+
+    if cookies is not None:
+        lines.extend(_session_section(cookies, summaries))
 
     competitions = competition_ids(summaries)
     rosters = roster_ids(summaries)
