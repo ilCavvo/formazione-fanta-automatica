@@ -84,13 +84,21 @@ jobs:
             run
 
       - name: Carica log e artefatti di debug
-        # Servono soprattutto quando il run fallisce: contengono HTML e
-        # screenshot delle pagine della lega al momento dell'errore.
+        # ATTENZIONE: su una repo pubblica gli artifact sono scaricabili da
+        # chiunque. Per questo `out/lega/` e `out/inspect/` sono ESCLUSI: sono
+        # HTML e screenshot delle pagine della lega da loggato, e possono
+        # contenere token anti-CSRF e dati personali dell'account.
+        # Quello che resta (log con i segreti oscurati, riepilogo del run, HTML
+        # di pagine gia' pubbliche) basta a capire cosa e' andato storto.
+        # Se ti serve il dettaglio delle pagine della lega, riproducilo in
+        # locale con `fantabot inspect`: resta sulla tua macchina.
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fantabot-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             out/
+            !out/lega/
+            !out/inspect/
           retention-days: 14
           if-no-files-found: warn

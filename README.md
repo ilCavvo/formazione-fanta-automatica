@@ -145,7 +145,9 @@ Ogni run scrive in `out/`:
 - `lega/` — HTML e screenshot delle pagine della lega (fondamentali se qualcosa
   va storto).
 
-In GitHub Actions `out/` viene caricata come artifact del job.
+In GitHub Actions viene caricata come artifact del job **solo** la parte non
+sensibile di `out/`: `out/lega/` e `out/inspect/` sono esclusi apposta, vedi
+[Sicurezza](#sicurezza-e-limiti-noti).
 
 ---
 
@@ -304,6 +306,18 @@ inaffidabile e si ferma senza schierare.
   d'ambiente / GitHub Secrets. Il logger oscura i loro valori prima di scrivere,
   perche' il log finisce negli artifact della Action. Un test verifica che
   `config.yaml` non contenga parole come `password` o `token`.
+- **Artifact e visibilita' della repo.** Su una repo **pubblica** gli artifact
+  dei workflow sono scaricabili da chiunque. I secret non ci finiscono mai (sono
+  cifrati da GitHub, mascherati nei log, e non vengono passati ai workflow
+  lanciati da fork), ma `out/lega/` e `out/inspect/` conterrebbero HTML e
+  screenshot delle pagine della lega **da loggato** — con possibili token
+  anti-CSRF e dati del tuo account. Per questo il workflow li esclude
+  esplicitamente dall'upload. Restano nell'artifact il log (con i segreti
+  oscurati), `result.json` e l'HTML di pagine gia' pubbliche.
+  Se ti serve il dettaglio delle pagine della lega, usa `fantabot inspect` in
+  locale. Nota che log e `result.json` contengono comunque lo slug della lega e
+  la tua rosa: se la cosa ti da' fastidio, **tieni la repo privata** — e' la
+  scelta piu' semplice e non ha controindicazioni.
 - **Scraping gentile.** Un solo User-Agent dichiarato, delay minimo fra due
   richieste allo stesso host (default 2s), retry con backoff esponenziale solo
   sugli errori transitori, cache su disco a TTL cosi' i run ravvicinati non
