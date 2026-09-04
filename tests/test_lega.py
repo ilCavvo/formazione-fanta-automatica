@@ -125,3 +125,42 @@ class TestAggancioDalLoginDiWww:
 
         handoff = selectors["login"]["handoff_url"].format(target=quote(LEAGUE, safe=""))
         assert is_login_url(handoff) is True
+
+
+class TestBannerConsensi:
+    """Il CMP e' un overlay: intercetta i click e li fa scadere in timeout.
+
+    Non e' un problema solo del login — bloccherebbe anche lo schieramento e il
+    salvataggio della formazione, quindi la configurazione deve esserci e
+    coprire il CMP che il sito usa davvero (PubTech).
+    """
+
+    def test_esiste_la_sezione_consent(self, selectors):
+        assert "consent" in selectors
+
+    def test_copre_il_cmp_di_fantacalcio(self, selectors):
+        """PubTech e' quello che ha bloccato il run reale."""
+        accept = " ".join(selectors["consent"]["accept_button"])
+        assert "pubtech-cmp" in accept
+        assert "#pubtech-cmp" in selectors["consent"]["container"]
+
+    def test_bottoni_in_italiano_e_inglese(self, selectors):
+        accept = " ".join(selectors["consent"]["accept_button"])
+        assert "Accetta" in accept
+        assert "Accept" in accept
+
+    def test_c_e_un_ripiego_per_rimuovere_l_overlay(self, selectors):
+        """Se nessun bottone e' cliccabile, l'overlay va tolto dal DOM."""
+        assert len(selectors["consent"]["container"]) >= 1
+
+
+class TestTimeoutDeiClick:
+    def test_il_timeout_e_corto(self):
+        """Aspettare 30s non serve: se un overlay intercetta, non passera' mai.
+
+        Il run reale ha bruciato 30s per ciascun tentativo prima di fallire.
+        """
+        from fantabot.lega.client import CLICK_TIMEOUT_MS, CONSENT_TIMEOUT_MS
+
+        assert CLICK_TIMEOUT_MS <= 10_000
+        assert CONSENT_TIMEOUT_MS <= CLICK_TIMEOUT_MS

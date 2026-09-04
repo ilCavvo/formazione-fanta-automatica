@@ -50,6 +50,25 @@ login:
   # Presenza di uno di questi = sessione attiva.
   logged_in_marker: [".display-username", "a[href*='logout']", ".user-menu"]
 
+# Banner di consenso cookie (CMP). Su leghe.fantacalcio.it e' PubTech, e in
+# headless resta sopra a tutto: Playwright vede il bottone giusto ma il click
+# non arriva mai perche' l'overlay "intercepts pointer events". Va tolto di
+# mezzo dopo OGNI navigazione, non solo al login: bloccherebbe anche il
+# salvataggio della formazione.
+consent:
+  accept_button:
+    - "#pubtech-cmp button:has-text('Accetta')"
+    - "#pubtech-cmp button:has-text('Accetto')"
+    - "#pubtech-cmp button:has-text('Accept')"
+    - "#onetrust-accept-btn-handler"
+    - "[id*='cmp'] button:has-text('Accetta')"
+    - "button:has-text('Accetta tutto')"
+  # Se nessun bottone funziona, l'overlay viene rimosso dal DOM.
+  container:
+    - "#pubtech-cmp"
+    - "#onetrust-consent-sdk"
+    - ".qc-cmp2-container"
+
 pages:
   # Segnaposto disponibili: {slug} (lo slug della lega) e {team_id}
   # (l'identificativo della TUA squadra, il numero in fondo all'URL della rosa:
