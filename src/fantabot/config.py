@@ -28,6 +28,7 @@ class Secrets:
     username: str | None
     password: str | None
     league_slug: str | None
+    team_id: str | None
     telegram_token: str | None
     telegram_chat_id: str | None
 
@@ -37,6 +38,7 @@ class Secrets:
             username=_env("FANTACALCIO_USERNAME"),
             password=_env("FANTACALCIO_PASSWORD"),
             league_slug=_env("FANTACALCIO_LEAGUE_SLUG"),
+            team_id=_env("FANTACALCIO_TEAM_ID"),
             telegram_token=_env("TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
         )
@@ -122,3 +124,8 @@ class Config:
 
     def league_slug(self, secrets: Secrets) -> str | None:
         return secrets.league_slug or (self.get("league.slug") or None)
+
+    def team_id(self, secrets: Secrets) -> str | None:
+        """Id della squadra dell'utente. L'ambiente vince sul file di config."""
+        value = secrets.team_id or self.get("league.team_id")
+        return str(value) if value else None

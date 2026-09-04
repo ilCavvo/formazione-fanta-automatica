@@ -24,6 +24,11 @@ on:
 
   workflow_dispatch:
     inputs:
+      command:
+        description: "Cosa eseguire"
+        type: choice
+        options: ["run", "discover"]
+        default: "run"
       dry_run:
         description: "Calcola e notifica senza inviare la formazione"
         type: boolean
@@ -67,11 +72,14 @@ jobs:
       - name: Installa Chromium per Playwright
         run: python -m playwright install --with-deps chromium
 
-      - name: Schiera la formazione
+      - name: Esegui fantabot
         env:
           FANTACALCIO_USERNAME: ${{ secrets.FANTACALCIO_USERNAME }}
           FANTACALCIO_PASSWORD: ${{ secrets.FANTACALCIO_PASSWORD }}
           FANTACALCIO_LEAGUE_SLUG: ${{ secrets.FANTACALCIO_LEAGUE_SLUG }}
+          # Opzionale: serve solo alle pagine per-squadra. La rosa si legge
+          # dalla pagina formazione, che si risolve da sola sull'utente loggato.
+          FANTACALCIO_TEAM_ID: ${{ secrets.FANTACALCIO_TEAM_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Sui run schedulati resta vuota e decide config/config.yaml.
@@ -86,13 +94,16 @@ jobs:
                 || '' }}
           FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
           LOG_LEVEL: ${{ inputs.log_level || 'INFO' }}
+          # `discover` mappa le pagine della lega e scrive out/discovery.md:
+          # e' il comando da lanciare quando la lettura della rosa fallisce.
+          COMMAND: ${{ inputs.command || 'run' }}
         run: |
           args=(--log-level "$LOG_LEVEL")
           if [ "$FORCE" = "true" ]; then
             args+=(--force)
           fi
-          echo "DRY_RUN=${DRY_RUN:-<da config.yaml>}  FORCE=$FORCE"
-          fantabot "${args[@]}" run
+          echo "COMMAND=$COMMAND  DRY_RUN=${DRY_RUN:-<da config.yaml>}  FORCE=$FORCE"
+          fantabot "${args[@]}" "$COMMAND"
 
       - name: Carica log e artefatti di debug
         # ATTENZIONE: su una repo pubblica gli artifact sono scaricabili da

@@ -4,7 +4,8 @@
     fantabot run --no-dry-run    # schiera davvero
     fantabot probabili           # solo scraping+aggregazione, senza login
     fantabot deadline            # quando scade la prossima giornata
-    fantabot inspect             # scarica le pagine della lega per i selettori
+    fantabot discover            # mappa le pagine della lega (report sicuro)
+    fantabot inspect             # HTML+screenshot della lega (solo in locale)
     fantabot notify-test         # verifica che il bot Telegram funzioni
 """
 
@@ -53,7 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run", help="run completo")
     sub.add_parser("probabili", help="solo fonti + aggregazione, nessun login")
     sub.add_parser("deadline", help="mostra la deadline della prossima giornata")
-    sub.add_parser("inspect", help="scarica le pagine della lega per tarare i selettori")
+    sub.add_parser("discover", help="mappa le pagine della lega (report pubblicabile)")
+    sub.add_parser("inspect", help="scarica HTML e screenshot della lega (solo locale)")
     sub.add_parser("notify-test", help="manda un messaggio di prova su Telegram")
     return parser
 
@@ -79,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         "run": _cmd_run,
         "probabili": _cmd_probabili,
         "deadline": _cmd_deadline,
+        "discover": _cmd_discover,
         "inspect": _cmd_inspect,
         "notify-test": _cmd_notify_test,
     }
@@ -158,6 +161,7 @@ def _cmd_inspect(cfg: Config, secrets: Secrets, args) -> int:
         slug=slug,
         username=secrets.username or "",
         password=secrets.password or "",
+        team_id=cfg.team_id(secrets),
         selectors=load_selectors(),
         headless=not args.headful,
         artifacts_dir=out,
@@ -169,6 +173,53 @@ def _cmd_inspect(cfg: Config, secrets: Secrets, args) -> int:
     for path in saved:
         print(f"  {path}")
     print("\nApri gli HTML, individua i selettori giusti e aggiorna config/selectors.yaml")
+    return 0
+
+
+def _cmd_discover(cfg: Config, secrets: Secrets, args) -> int:
+    """Mappa le pagine della lega e scrive un report sicuro da pubblicare.
+
+    E' il comando da lanciare quando la lettura della rosa fallisce: il report
+    dice come sono fatte davvero le pagine, senza esporre HTML o screenshot.
+    """
+    from fantabot.lega.client import LeagueClient, load_selectors
+    from fantabot.lega.discovery import competition_ids, roster_ids, to_markdown
+
+    slug = cfg.league_slug(secrets)
+    if not slug or not secrets.has_credentials:
+        log.error("servono credenziali e slug della lega per il discover")
+        return 1
+
+    with LeagueClient(
+        slug=slug,
+        username=secrets.username or "",
+        password=secrets.password or "",
+        team_id=cfg.team_id(secrets),
+        selectors=load_selectors(),
+        headless=not args.headful,
+        artifacts_dir=None,  # nessun HTML grezzo: solo il riassunto
+    ) as lega:
+        lega.login()
+        summaries = lega.discover()
+
+    out = cfg.output_dir
+    out.mkdir(parents=True, exist_ok=True)
+    report = out / "discovery.md"
+    report.write_text(to_markdown(summaries), encoding="utf-8")
+
+    print(f"Report scritto in {report}")
+    competitions = competition_ids(summaries)
+    rosters = roster_ids(summaries)
+    if competitions:
+        print(f"Id competizione trovati: {', '.join(competitions)}")
+    if rosters:
+        print(f"Id rose trovati: {', '.join(rosters)}")
+    for summary in summaries:
+        stato = summary.error or (
+            f"{len(summary.containers)} contenitori, {len(summary.links)} link"
+        )
+        freccia = f" -> {summary.final_url}" if summary.redirected else ""
+        print(f"  {summary.name}: {stato}{freccia}")
     return 0
 
 

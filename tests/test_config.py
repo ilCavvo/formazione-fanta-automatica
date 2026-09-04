@@ -91,6 +91,21 @@ class TestSecrets:
         monkeypatch.setenv("FANTACALCIO_LEAGUE_SLUG", "la-mia-lega")
         assert real_config.league_slug(Secrets.from_env()) == "la-mia-lega"
 
+    def test_team_id_da_env_vince_su_config(self, config_factory, monkeypatch):
+        cfg = config_factory({"league.team_id": "111"})
+        monkeypatch.setenv("FANTACALCIO_TEAM_ID", "4163261")
+        assert cfg.team_id(Secrets.from_env()) == "4163261"
+
+    def test_team_id_dalla_config_se_manca_lenv(self, config_factory, monkeypatch):
+        monkeypatch.delenv("FANTACALCIO_TEAM_ID", raising=False)
+        cfg = config_factory({"league.team_id": 4163261})
+        assert cfg.team_id(Secrets.from_env()) == "4163261"
+
+    def test_team_id_assente(self, real_config, monkeypatch):
+        """Deve poter mancare: la rosa si legge dalla pagina formazione."""
+        monkeypatch.delenv("FANTACALCIO_TEAM_ID", raising=False)
+        assert real_config.team_id(Secrets.from_env()) is None
+
     def test_nessuna_credenziale_nel_file_versionato(self, real_config):
         """Guardia contro il commit accidentale di un segreto in config.yaml."""
         blob = str(real_config.as_dict()).lower()
@@ -155,3 +170,37 @@ class TestRegolamento:
         parse_rules_text("").applied_to(cfg)
         assert cfg.get("league.modifiers.modificatore_difesa") is False
         assert cfg.get("league.allowed_modules") == moduli_prima
+
+
+class TestUrlPagineLega:
+    """Gli URL in selectors.yaml sono quelli veri di leghe.fantacalcio.it."""
+
+    def _selectors(self):
+        from fantabot.lega.client import load_selectors
+        from tests.conftest import PROJECT_ROOT
+
+        return load_selectors(PROJECT_ROOT / "config" / "selectors.yaml")
+
+    def test_la_rosa_si_legge_dalla_pagina_formazione(self):
+        """Cosi' non serve sapere il proprio team_id: la pagina lo risolve."""
+        selectors = self._selectors()
+        assert selectors["rosa"]["page"] == "formazione"
+
+    def test_url_formazione_senza_id_competizione(self):
+        """Senza id il sito reindirizza sulla competizione dell'utente loggato."""
+        url = self._selectors()["pages"]["formazione"]
+        assert url.endswith("/view/competition/lineup")
+        assert "{slug}" in url
+        assert "{team_id}" not in url
+
+    def test_url_rosa_usa_il_team_id(self):
+        url = self._selectors()["pages"]["rosa"]
+        assert "/view/rosters/{team_id}" in url
+
+    def test_i_template_hanno_solo_segnaposto_noti(self):
+        import re
+
+        noti = {"slug", "team_id"}
+        for name, url in self._selectors()["pages"].items():
+            trovati = set(re.findall(r"\{(\w+)\}", url))
+            assert trovati <= noti, f"{name}: segnaposto sconosciuti {trovati - noti}"

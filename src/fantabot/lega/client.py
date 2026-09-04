@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+from fantabot.lega.discovery import PageSummary, summarise
 from fantabot.models import Lineup, Role, RosterPlayer
 
 log = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ class LeagueClient:
         slug: str,
         username: str,
         password: str,
+        team_id: str | None = None,
         selectors: dict[str, Any] | None = None,
         headless: bool = True,
         timeout_ms: int = 30_000,
@@ -100,6 +102,7 @@ class LeagueClient:
         timezone: str = "Europe/Rome",
     ) -> None:
         self.slug = slug
+        self.team_id = team_id
         self._username = username
         self._password = password
         self.selectors = selectors or load_selectors()
@@ -203,20 +206,36 @@ class LeagueClient:
 
     def _page_url(self, key: str) -> str:
         template = self.selectors["pages"][key]
-        return template.format(slug=self.slug)
+        if "{team_id}" in template and not self.team_id:
+            raise LeagueError(
+                f"la pagina '{key}' ha bisogno del team_id, che non e' impostato. "
+                "E' il numero in fondo all'URL della tua rosa "
+                "(/view/rosters/<team_id>): impostalo con FANTACALCIO_TEAM_ID "
+                "oppure lancia `fantabot discover` per trovarlo."
+            )
+        return template.format(slug=self.slug, team_id=self.team_id or "")
 
     def read_roster(self) -> list[RosterPlayer]:
-        """Legge la rosa dalla pagina della lega."""
-        url = self._page_url("rosa")
-        self.page.goto(url, wait_until="networkidle")
+        """Legge la rosa dalla lega.
+
+        Di default la prende dalla **pagina formazione**, non da una pagina
+        rosa separata: e' li' che compare l'elenco dei giocatori schierabili,
+        e soprattutto quella pagina si risolve da sola sulla squadra
+        dell'utente loggato, senza bisogno di sapere il proprio team_id.
+        La sorgente e' comunque configurabile con `rosa.page`.
+        """
         cfg = self.selectors["rosa"]
+        url = self._page_url(cfg.get("page", "formazione"))
+        self.page.goto(url, wait_until="networkidle")
 
         rows = self._query_all(cfg["row"])
         if not rows:
             self.save_artifacts("rosa")
             raise LeagueError(
-                f"nessuna riga rosa trovata su {url}. Lancia `fantabot inspect` e "
-                "aggiorna `rosa.row` in config/selectors.yaml."
+                f"nessuna riga rosa trovata su {url} "
+                f"(pagina finale: {self.page.url}). Lancia `fantabot discover`: "
+                "produce la mappa delle pagine della lega, da cui ricavare il "
+                "selettore giusto per `rosa.row` in config/selectors.yaml."
             )
 
         roster: list[RosterPlayer] = []
@@ -244,7 +263,9 @@ class LeagueClient:
         if not roster:
             self.save_artifacts("rosa")
             raise LeagueError(
-                f"rosa letta ma vuota su {url}: i selettori nome/ruolo non combaciano."
+                f"rosa letta ma vuota su {url}: ho trovato {len(rows)} righe ma i "
+                "selettori nome/ruolo non combaciano. Lancia `fantabot discover` "
+                "per vedere come sono fatte davvero le righe."
             )
         log.info("rosa letta: %d giocatori", len(roster))
         return roster
@@ -385,9 +406,14 @@ class LeagueClient:
             log.debug("impossibile salvare gli artefatti", exc_info=True)
 
     def inspect(self) -> list[Path]:
-        """Scarica le pagine che servono per tarare i selettori."""
+        """Scarica le pagine che servono per tarare i selettori.
+
+        Salva HTML **grezzo** e screenshot: sono materiale da pagina loggata,
+        quindi restano in locale e non vanno pubblicati (il workflow li esclude
+        dagli artifact). Per un riassunto sicuro da allegare usa `discover()`.
+        """
         saved: list[Path] = []
-        for key in ("rosa", "formazione", "regolamento"):
+        for key in ("home", "formazione", "rosa", "regolamento"):
             try:
                 self.page.goto(self._page_url(key), wait_until="networkidle")
                 self.save_artifacts(key)
@@ -396,6 +422,37 @@ class LeagueClient:
             except Exception as exc:  # noqa: BLE001
                 log.warning("pagina %s non ispezionabile: %s", key, exc)
         return saved
+
+    def discover(self) -> list[PageSummary]:
+        """Mappa la struttura delle pagine della lega, in modo pubblicabile.
+
+        Visita le pagine note e ne produce un riassunto strutturale (link,
+        classi, contenitori ripetuti). A differenza di `inspect()` non salva
+        HTML grezzo ne' screenshot, quindi il risultato puo' finire negli
+        artifact anche di una repo pubblica.
+        """
+        summaries: list[PageSummary] = []
+        for key in ("home", "formazione", "rosa", "regolamento"):
+            try:
+                requested = self._page_url(key)
+            except LeagueError as exc:
+                # Tipicamente: manca il team_id. Non e' un motivo per fermarsi,
+                # anzi e' proprio quello che discover deve aiutare a trovare.
+                log.info("pagina %s saltata: %s", key, exc)
+                continue
+            try:
+                self.page.goto(requested, wait_until="networkidle")
+                summaries.append(
+                    summarise(self.page.content(), key, requested, self.page.url)
+                )
+                log.info("mappata la pagina %s (-> %s)", key, self.page.url)
+            except Exception as exc:  # noqa: BLE001 - una pagina rotta non blocca
+                log.warning("pagina %s non mappabile: %s", key, exc)
+                summaries.append(
+                    PageSummary(name=key, requested_url=requested, final_url="",
+                                error=str(exc)[:200])
+                )
+        return summaries
 
     # -- helper sui selettori a lista ---------------------------------------
 

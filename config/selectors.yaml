@@ -23,12 +23,28 @@ login:
   logged_in_marker: [".display-username", "a[href*='logout']", ".user-menu"]
 
 pages:
-  # {slug} viene sostituito con lo slug della lega.
-  rosa: "https://leghe.fantacalcio.it/{slug}/rosa"
-  formazione: "https://leghe.fantacalcio.it/{slug}/formazione"
+  # Segnaposto disponibili: {slug} (lo slug della lega) e {team_id}
+  # (l'identificativo della TUA squadra, il numero in fondo all'URL della rosa:
+  #  https://leghe.fantacalcio.it/<slug>/view/rosters/<team_id>).
+  # Il team_id si imposta col secret FANTACALCIO_TEAM_ID oppure con
+  # league.team_id in config.yaml.
+  home: "https://leghe.fantacalcio.it/{slug}"
+  rosa: "https://leghe.fantacalcio.it/{slug}/view/rosters/{team_id}"
+  # Non ancora confermato: lanciare `fantabot discover` per ricavare l'URL
+  # vero dalla mappa dei link della lega.
+  # La pagina di inserimento formazione: senza id competizione il sito
+  # reindirizza da solo su quella giusta per l'utente loggato
+  # (.../view/competition/<id>/lineup).
+  formazione: "https://leghe.fantacalcio.it/{slug}/view/competition/lineup"
   regolamento: "https://leghe.fantacalcio.it/{slug}/regolamento"
 
 rosa:
+  # Da quale pagina leggere la rosa (una chiave di `pages` qui sopra).
+  # Di default e' la pagina formazione: contiene gia' l'elenco dei giocatori
+  # schierabili e, soprattutto, si risolve da sola sulla squadra dell'utente
+  # loggato, quindi non serve conoscere il proprio team_id.
+  page: "formazione"
+
   # Righe della tabella rosa.
   row: ["table.player-list tbody tr", "#rosa tbody tr", "table tbody tr"]
   role: ["td.role", ".player-role", "[class*=role]"]
