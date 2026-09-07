@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from fantabot.lega.discovery import PageSummary, summarise
+from fantabot.lega.discovery import PageSummary, summarise, to_markdown
 from fantabot.models import Lineup, Role, RosterPlayer
 
 log = logging.getLogger(__name__)
@@ -40,6 +40,9 @@ _DEADLINE_TEXT = re.compile(
     r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})[^\d]{1,12}(\d{1,2})[:.](\d{2})"
 )
 
+
+#: Quanto aspettare che il login produca un effetto (XHR + cambio rotta).
+LOGIN_WAIT_MS = 15_000
 
 #: Attesa massima per il bottone del banner consensi.
 CONSENT_TIMEOUT_MS = 5_000
@@ -121,6 +124,7 @@ class LeagueClient:
         headless: bool = True,
         timeout_ms: int = 30_000,
         artifacts_dir: Path | None = None,
+        diagnostics_dir: Path | None = None,
         timezone: str = "Europe/Rome",
     ) -> None:
         self.slug = slug
@@ -131,6 +135,11 @@ class LeagueClient:
         self.headless = headless
         self.timeout_ms = timeout_ms
         self.artifacts_dir = artifacts_dir
+        # `artifacts_dir` contiene HTML e screenshot da pagina loggata e resta
+        # fuori dagli artifact. Qui invece finisce il riassunto strutturale,
+        # che e' sicuro da pubblicare: e' quello che serve per capire i guasti
+        # senza dover chiedere di rilanciare a mano un comando diverso.
+        self.diagnostics_dir = diagnostics_dir
         self.tz = ZoneInfo(timezone)
 
         self._playwright = None
@@ -255,12 +264,12 @@ class LeagueClient:
             return
 
         self.save_artifacts("muro-di-login")
+        report = self._save_diagnostics("muro-di-login")
+        dove = f" Diagnostica in {report}." if report else ""
         raise LeagueError(
             f"{url} rimanda ancora al login ({self.page.url}) dopo entrambi i "
             "tentativi di accesso. Le credenziali sono valide (l'API le accetta), "
-            "quindi il problema e' la sessione su leghe.fantacalcio.it: lancia "
-            "`fantabot discover`, che riporta i domini dei cookie e la struttura "
-            "del form di login."
+            f"quindi il problema e' la sessione su leghe.fantacalcio.it.{dove}"
         )
 
     def _open(self, url: str) -> None:
@@ -349,14 +358,33 @@ class LeagueClient:
         vogliamo autenticarci proprio dove il sito ci ha portati, cosi' e' lui
         a riportarci a destinazione.
         """
-        self._fill_first(cfg["username_input"], self._username)
-        self._fill_first(cfg["password_input"], self._password)
+        self._fill_first(cfg["username_input"], self._username, "username")
+        self._fill_first(cfg["password_input"], self._password, "password")
         self._submit_login_form(cfg)
+        self._await_login_outcome()
+        log.info("form di login inviato, ora su %s", self.page.url)
+
+    def _await_login_outcome(self) -> None:
+        """Aspetta che il login produca un effetto, invece di guardare subito.
+
+        La pagina di login della lega e' un'app Angular: l'accesso e' una XHR
+        seguita da un cambio di rotta lato client, quindi `networkidle` torna
+        subito (la pagina era gia' ferma) e un controllo immediato dell'URL ci
+        troverebbe ancora sul login anche quando l'accesso sta andando a buon
+        fine. Aspettiamo invece che l'URL smetta di essere quello di login.
+        """
         try:
-            self.page.wait_for_load_state("networkidle")
+            self.page.wait_for_url(
+                lambda url: not is_login_url(url), timeout=LOGIN_WAIT_MS
+            )
+            return
+        except Exception:  # noqa: BLE001 - puo' restare li' per un errore vero
+            log.info("dopo %.0fs siamo ancora su %s",
+                     LOGIN_WAIT_MS / 1000, self.page.url)
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=LOGIN_WAIT_MS)
         except Exception:  # noqa: BLE001 - alcune pagine restano "occupate"
             log.debug("networkidle non raggiunto dopo il submit", exc_info=True)
-        log.info("form di login inviato, ora su %s", self.page.url)
 
     def _submit_login_form(self, cfg: dict[str, Any]) -> None:
         """Invia il form di login.
@@ -584,6 +612,30 @@ class LeagueClient:
 
     # -- diagnostica --------------------------------------------------------
 
+    def _save_diagnostics(self, label: str) -> Path | None:
+        """Scrive il riassunto strutturale della pagina corrente.
+
+        Va nella cartella pubblicabile, non fra gli artefatti da pagina
+        loggata: cosi' la diagnostica arriva **insieme al fallimento**, senza
+        dover rilanciare a mano `fantabot discover`.
+        """
+        if self.diagnostics_dir is None or self._page is None:
+            return None
+        try:
+            summary = summarise(self.page.content(), label, self.page.url,
+                                self.page.url)
+            text = to_markdown([summary], cookies=self.cookie_domains())
+        except Exception:  # noqa: BLE001 - la diagnostica non deve mai far fallire
+            log.debug("impossibile produrre la diagnostica", exc_info=True)
+            return None
+
+        self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        safe = re.sub(r"[^a-z0-9_-]+", "-", label.lower())
+        path = self.diagnostics_dir / f"diagnostica-{safe}.md"
+        path.write_text(text, encoding="utf-8")
+        log.info("diagnostica scritta in %s", path)
+        return path
+
     def save_artifacts(self, label: str) -> None:
         """Salva HTML e screenshot della pagina corrente per il debug post-mortem."""
         if self.artifacts_dir is None or self._page is None:
@@ -675,13 +727,31 @@ class LeagueClient:
                 continue
         return False
 
-    def _fill_first(self, candidates: list[str], value: str) -> None:
+    def _fill_first(self, candidates: list[str], value: str,
+                    label: str = "campo") -> None:
         locator = self._query_first(candidates)
         if locator is None:
             raise LeagueError(
-                f"campo non trovato su {self.page.url} (selettori provati: {candidates})"
+                f"campo {label} non trovato su {self.page.url} "
+                f"(selettori provati: {candidates})"
             )
         locator.fill(value)
+
+        # Un selettore generico puo' aver preso il campo sbagliato (una barra di
+        # ricerca invece dello username), e un framework puo' riazzerare il
+        # valore al re-render. In entrambi i casi il login fallirebbe in
+        # silenzio: meglio accorgersene qui. Confrontiamo solo la lunghezza,
+        # cosi' il valore non finisce mai nei log.
+        try:
+            written = len(locator.input_value())
+        except Exception:  # noqa: BLE001 - non tutti gli elementi hanno un valore
+            return
+        if written != len(value):
+            log.warning(
+                "il campo %s non ha accettato il valore (%d caratteri invece di %d): "
+                "il selettore potrebbe puntare all'elemento sbagliato",
+                label, written, len(value),
+            )
 
     def _click_first(self, candidates: list[str]) -> None:
         locator = self._query_first(candidates)

@@ -23,15 +23,23 @@ login:
   # Il muro di login puo' comparire su domini diversi (www.fantacalcio.it
   # oppure leghe.fantacalcio.it/login?next=...), con markup diverso: i
   # candidati vanno dal piu' specifico al piu' generico.
+  # La pagina di login di leghe e' un'app Angular con ng-zorro: i campi hanno
+  # `formcontrolname` e spesso nessun `name`. I candidati specifici vanno
+  # prima di quelli generici: `form input[type=text]` e' l'ultima spiaggia e
+  # potrebbe prendere una barra di ricerca invece dello username (per questo
+  # il client verifica che il campo abbia davvero accettato il valore).
   username_input:
     - "#loginForm input[name=username]"
     - "input[name=username]"
+    - "input[formcontrolname=username]"
+    - "input[formcontrolname=email]"
     - "input[name=email]"
     - "input[type=email]"
     - "form input[type=text]"
   password_input:
     - "#loginForm input[name=password]"
     - "input[name=password]"
+    - "input[formcontrolname=password]"
     - "input[type=password]"
   # Attenzione: un <button> dentro un form e' gia' di tipo submit anche senza
   # `type="submit"`, quindi il selettore per attributo NON lo trova. Da qui i
