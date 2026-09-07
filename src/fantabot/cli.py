@@ -165,6 +165,7 @@ def _cmd_inspect(cfg: Config, secrets: Secrets, args) -> int:
         selectors=load_selectors(),
         headless=not args.headful,
         artifacts_dir=out,
+        diagnostics_dir=cfg.output_dir,
     ) as lega:
         lega.login()
         saved = lega.inspect()
@@ -198,6 +199,7 @@ def _cmd_discover(cfg: Config, secrets: Secrets, args) -> int:
         selectors=load_selectors(),
         headless=not args.headful,
         artifacts_dir=None,  # nessun HTML grezzo: solo il riassunto
+        diagnostics_dir=cfg.output_dir,
     ) as lega:
         # Il login puo' fallire: e' proprio quando serve di piu' sapere come
         # sono fatte le pagine. Registriamo l'errore e mappiamo lo stesso,

@@ -104,6 +104,7 @@ class Runner:
             selectors=load_selectors(),
             headless=self.headless,
             artifacts_dir=out_dir / "lega",
+            diagnostics_dir=out_dir,
             timezone=str(self.cfg.get("deadline.timezone", "Europe/Rome")),
         ) as lega:
             lega.login()

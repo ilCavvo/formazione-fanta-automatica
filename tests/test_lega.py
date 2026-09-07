@@ -164,3 +164,33 @@ class TestTimeoutDeiClick:
 
         assert CLICK_TIMEOUT_MS <= 10_000
         assert CONSENT_TIMEOUT_MS <= CLICK_TIMEOUT_MS
+
+
+class TestCampiDiLogin:
+    """La pagina di login di leghe e' Angular: i campi possono non avere `name`."""
+
+    def test_candidati_specifici_prima_dei_generici(self, selectors):
+        """`form input[type=text]` puo' prendere il campo sbagliato: va per ultimo."""
+        username = selectors["login"]["username_input"]
+        assert username[-1] == "form input[type=text]"
+        assert username.index("input[name=username]") < username.index(
+            "form input[type=text]"
+        )
+
+    def test_copre_i_form_control_di_angular(self, selectors):
+        username = " ".join(selectors["login"]["username_input"])
+        password = " ".join(selectors["login"]["password_input"])
+        assert "formcontrolname=username" in username
+        assert "formcontrolname=password" in password
+
+
+class TestAttesaDelLogin:
+    def test_c_e_un_attesa_esplicita_dopo_il_submit(self):
+        """Su una SPA `networkidle` torna subito: serve attendere l'esito vero.
+
+        Il run reale controllava l'URL nello stesso secondo del submit e
+        concludeva "ancora sul login" prima che la XHR di accesso finisse.
+        """
+        from fantabot.lega.client import LOGIN_WAIT_MS
+
+        assert LOGIN_WAIT_MS >= 10_000
