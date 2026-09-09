@@ -263,3 +263,44 @@ class TestDiagnosticaLeggibile:
 
         sorgente = inspect.getsource(_cmd_discover)
         assert "report.read_text" in sorgente
+
+
+class TestAttesaDelCaricamento:
+    """L'app della lega e' Angular: il DOM utile arriva dopo le sue XHR.
+
+    `domcontentloaded` segnala solo il guscio. La diagnostica del run reale
+    mostrava `nz-spin` e `ant-spin-dot-item` al posto dei giocatori: stavamo
+    leggendo la pagina mentre lo spinner era ancora a schermo.
+    """
+
+    def test_esiste_la_sezione_loading(self, selectors):
+        assert "loading" in selectors
+        assert selectors["loading"]["spinner"]
+
+    def test_copre_lo_spinner_di_ng_zorro(self, selectors):
+        spinner = " ".join(selectors["loading"]["spinner"])
+        assert "ant-spin" in spinner
+        assert "nz-spin" in spinner
+
+    def test_il_timeout_di_caricamento_e_generoso(self, selectors):
+        """Piu' lungo dell'assestamento: qui si aspettano chiamate di rete."""
+        from fantabot.lega.client import SETTLE_TIMEOUT_MS
+
+        assert selectors["loading"]["timeout_ms"] > SETTLE_TIMEOUT_MS
+
+    def test_ogni_navigazione_aspetta_il_contenuto(self):
+        import inspect
+
+        from fantabot.lega.client import LeagueClient
+
+        assert "_wait_for_content" in inspect.getsource(LeagueClient._open)
+
+    def test_la_rosa_aspetta_le_righe_prima_di_arrendersi(self):
+        import inspect
+
+        from fantabot.lega.client import LeagueClient
+
+        sorgente = inspect.getsource(LeagueClient.read_roster)
+        assert "_wait_any" in sorgente
+        # L'attesa deve venire prima della lettura, altrimenti non serve.
+        assert sorgente.index("_wait_any") < sorgente.index("rows = self._query_all")

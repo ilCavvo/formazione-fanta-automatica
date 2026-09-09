@@ -77,6 +77,21 @@ consent:
     - "#onetrust-consent-sdk"
     - ".qc-cmp2-container"
 
+# Indicatori di caricamento. L'app della lega e' Angular + ng-zorro: rende
+# prima il guscio con uno spinner, poi carica i dati via XHR e solo allora
+# disegna le liste. Senza aspettare che lo spinner sparisca si legge un DOM
+# vuoto — ed e' esattamente cosi' che la lettura della rosa falliva, con la
+# diagnostica che mostrava `nz-spin` e `ant-spin-dot-item` al posto dei
+# giocatori.
+loading:
+  spinner:
+    - "nz-spin.ant-spin-spinning"
+    - ".ant-spin-spinning"
+    - "nz-spin .ant-spin-dot"
+    - "ui-loader nz-spin"
+  # Quanto aspettare che il caricamento finisca.
+  timeout_ms: 25000
+
 pages:
   # Segnaposto disponibili: {slug} (lo slug della lega) e {team_id}
   # (l'identificativo della TUA squadra, il numero in fondo all'URL della rosa:

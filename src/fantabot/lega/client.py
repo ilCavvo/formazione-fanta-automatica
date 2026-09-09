@@ -293,6 +293,7 @@ class LeagueClient:
         self.page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         self._settle()
         self._dismiss_consent()
+        self._wait_for_content()
 
     def _settle(self) -> None:
         """Lascia un momento alla pagina per finire di renderizzare.
@@ -305,6 +306,33 @@ class LeagueClient:
         except Exception:  # noqa: BLE001 - non tutte le pagine emettono `load`
             log.debug("evento load non arrivato entro %dms", SETTLE_TIMEOUT_MS)
         self.page.wait_for_timeout(500)
+
+    def _wait_for_content(self) -> None:
+        """Aspetta che l'app abbia finito di caricare i dati.
+
+        `domcontentloaded` dice solo che e' arrivato il guscio: l'app Angular
+        della lega mostra uno spinner e disegna le liste solo dopo le sue XHR.
+        Leggere prima significa leggere un DOM vuoto — che e' come la lettura
+        della rosa falliva, trovando `nz-spin` invece dei giocatori.
+        """
+        cfg = self.selectors.get("loading") or {}
+        timeout = int(cfg.get("timeout_ms", 25_000))
+
+        for selector in cfg.get("spinner", []):
+            locator = self.page.locator(selector).first
+            try:
+                if locator.count() == 0:
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            try:
+                locator.wait_for(state="hidden", timeout=timeout)
+                log.info("caricamento finito (%s sparito)", selector)
+                return
+            except Exception:  # noqa: BLE001 - proseguiamo comunque
+                log.warning("lo spinner %s e' ancora a schermo dopo %dms: "
+                            "la pagina potrebbe essere incompleta", selector, timeout)
+                return
 
     def _dismiss_consent(self) -> None:
         """Accetta il banner dei consensi, o lo rimuove dal DOM.
@@ -473,6 +501,10 @@ class LeagueClient:
         url = self._page_url(cfg.get("page", "formazione"))
         self._goto(url)
 
+        # Le righe compaiono dopo il caricamento dei dati: diamo loro il tempo
+        # di apparire prima di dichiarare che non ci sono.
+        self._wait_any(cfg["row"], int(self.selectors.get("loading", {})
+                                       .get("timeout_ms", 25_000)))
         rows = self._query_all(cfg["row"])
         if not rows:
             self.save_artifacts("rosa")
@@ -741,6 +773,27 @@ class LeagueClient:
             if locator.count() > 0:
                 return locator
         return None
+
+    def _wait_any(self, candidates: list[str], timeout_ms: int) -> bool:
+        """Aspetta che almeno uno dei selettori compaia. Non alza se nessuno lo fa.
+
+        Il tempo va speso una volta sola sull'insieme, non per ogni candidato:
+        diviso fra i candidati, cosi' una lista lunga non moltiplica l'attesa.
+        """
+        if not candidates:
+            return False
+        quota = max(1_000, timeout_ms // len(candidates))
+        for selector in candidates:
+            try:
+                self.page.locator(selector).first.wait_for(
+                    state="attached", timeout=quota
+                )
+            except Exception:  # noqa: BLE001 - proviamo il candidato successivo
+                continue
+            else:
+                log.info("contenuto comparso: %s", selector)
+                return True
+        return False
 
     def _query_all(self, candidates: list[str]) -> list:
         for selector in candidates or []:
