@@ -142,6 +142,7 @@ class Runner:
             artifacts_dir=out_dir / "lega",
             diagnostics_dir=out_dir,
             capture_api=self.capture_api,
+            use_api=bool(self.cfg.get("league.use_api", True)),
             timezone=str(self.cfg.get("deadline.timezone", "Europe/Rome")),
         ) as lega:
             lega.login()
