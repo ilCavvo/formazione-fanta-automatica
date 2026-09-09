@@ -206,3 +206,20 @@ class TestLoginFallito:
     def test_senza_errore_nessun_avviso(self):
         report = to_markdown([PageSummary(name="home", requested_url="u", final_url="u")])
         assert "login e' fallito" not in report
+
+
+class TestCampioneConAttributi:
+    """Un ruolo reso come icona non ha testo: il significato sta negli attributi."""
+
+    def test_mostra_title_e_src_degli_elementi_senza_testo(self):
+        html = "<ul>" + "".join(
+            '<li class="row"><div class="role" title="Difensore"></div>'
+            f'<span class="player-name">Gioc{i}</span>'
+            '<img class="badge" src="/img/juve.png?v=2"></li>'
+            for i in range(8)
+        ) + "</ul>"
+        campione = summarise(html, "x", "u").containers[0].samples[0]
+        assert "div.role[title=Difensore]" in campione
+        assert "span.player-name=Gioc0" in campione
+        # Del percorso interessa solo il nome del file, senza query string.
+        assert "img.badge[src=juve.png]" in campione

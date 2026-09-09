@@ -304,3 +304,21 @@ class TestAttesaDelCaricamento:
         assert "_wait_any" in sorgente
         # L'attesa deve venire prima della lettura, altrimenti non serve.
         assert sorgente.index("_wait_any") < sorgente.index("rows = self._query_all")
+
+
+class TestSelettoriRosaReali:
+    """Ricavati dalla diagnostica della pagina lineup vera, non a intuito."""
+
+    def test_la_riga_e_la_card_del_giocatore(self, selectors):
+        """`ui-player-card` sono i 25 di rosa; `ui-lineup-slot` gli 11 in campo."""
+        row = selectors["rosa"]["row"]
+        assert row[0] == "section.cdk-drop-list ui-player-card"
+        assert not any("lineup-slot" in s for s in row)
+
+    def test_nome_e_ruolo(self, selectors):
+        assert selectors["rosa"]["name"][0] == "span.player-name"
+        assert selectors["rosa"]["role"][0] == "div.role"
+
+    def test_la_squadra_e_best_effort(self, selectors):
+        """Per un infortunato il riquadro del prossimo turno non c'e'."""
+        assert "ui-next-match-progress" in selectors["rosa"]["team"][0]

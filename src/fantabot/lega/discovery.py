@@ -237,14 +237,36 @@ def _sample_of(row: Node) -> list[str]:
     for node in row.css("*"):
         if node.child is not None and node.child.tag != "-text":
             continue  # non e' una foglia: il testo sta piu' in basso
-        text = node.text(strip=True)
-        if not text:
-            continue
         key = _shape_key(node)
-        out.append(f"{key}={text[:MAX_SAMPLE_TEXT]}")
-        if len(out) >= 12:
+        text = node.text(strip=True)
+        if text:
+            out.append(f"{key}={text[:MAX_SAMPLE_TEXT]}")
+        else:
+            # Senza testo l'elemento non e' per forza inutile: un ruolo o uno
+            # stato possono essere resi come icona, con il significato in un
+            # attributo. Senza questo il campione li nasconderebbe.
+            attrs = _describing_attributes(node)
+            if attrs:
+                out.append(f"{key}[{attrs}]")
+        if len(out) >= 14:
             break
     return out
+
+
+#: Attributi che di solito portano il significato di un elemento senza testo.
+_MEANINGFUL_ATTRS = ("title", "alt", "aria-label", "data-role", "data-value", "src")
+
+
+def _describing_attributes(node: Node) -> str:
+    parts = []
+    for name in _MEANINGFUL_ATTRS:
+        value = (node.attributes.get(name) or "").strip()
+        if not value:
+            continue
+        if name == "src":  # dei percorsi interessa solo il nome del file
+            value = value.rsplit("/", 1)[-1].split("?")[0]
+        parts.append(f"{name}={value[:MAX_SAMPLE_TEXT]}")
+    return " ".join(parts)
 
 
 # --------------------------------------------------------------------------

@@ -118,7 +118,13 @@ class PlayerMatcher:
         #: (team_norm | "") -> {surname_norm: (nome originale, squadra originale)}
         self._index: dict[str, dict[str, tuple[str, str]]] = {}
         for name, team in known:
-            team_key = self.aliases.canonical_team(team) if require_same_team else ""
+            # Chi non ha squadra finisce nel bucket senza nome, consultato come
+            # ripiego per qualunque squadra: sulla pagina della lega la squadra
+            # di un infortunato non e' mostrata, e senza questo quei giocatori
+            # non verrebbero mai riconosciuti dalle fonti.
+            team_key = (
+                self.aliases.canonical_team(team) if require_same_team and team else ""
+            )
             bucket = self._index.setdefault(team_key, {})
             bucket[self._key(name)] = (name, team)
 
@@ -129,11 +135,11 @@ class PlayerMatcher:
     def match(self, name: str, team: str) -> tuple[str, str] | None:
         """Ritorna `(nome, squadra)` canonici, o `None` se nessun match affidabile."""
         team_key = self.aliases.canonical_team(team) if self.require_same_team else ""
-        bucket = self._index.get(team_key)
-        if bucket is None:
-            if self.require_same_team:
-                return None
-            bucket = self._index.get("", {})
+        buckets = [self._index.get(team_key) or {}]
+        if team_key:
+            # Ripiego sui giocatori di cui non conosciamo la squadra.
+            buckets.append(self._index.get("") or {})
+        bucket = {k: v for b in buckets for k, v in b.items()}
         if not bucket:
             return None
 

@@ -115,11 +115,23 @@ rosa:
   # loggato, quindi non serve conoscere il proprio team_id.
   page: "formazione"
 
-  # Righe della tabella rosa.
-  row: ["table.player-list tbody tr", "#rosa tbody tr", "table tbody tr"]
-  role: ["td.role", ".player-role", "[class*=role]"]
-  name: ["td.player-name", ".player-name", "a[href*='/giocatore']"]
-  team: ["td.team", ".player-team", "[class*=team]"]
+  # Selettori ricavati dalla diagnostica della pagina lineup reale.
+  # L'app usa componenti Angular: ogni giocatore della rosa e' una
+  # `ui-player-card` dentro la `section.cdk-drop-list` (25 elementi), mentre
+  # `ui-lineup-slot` sono gli 11 posti in campo.
+  row:
+    - "section.cdk-drop-list ui-player-card"
+    - "ui-player-card"
+    - "table.player-list tbody tr"
+  role: ["div.role", "ui-role", "ui-player-role", "[class*=role]"]
+  name: ["span.player-name", "span.truncate", ".player-name"]
+  # Attenzione: la squadra sta nel riquadro del prossimo turno, che per un
+  # infortunato viene sostituito dalla dicitura "Infortunato". Puo' quindi
+  # mancare, e il matching dei nomi deve reggerlo (vedi require_same_team).
+  team:
+    - "ui-next-match-progress span.font-bold"
+    - "span.team-name"
+    - ".player-team"
   player_id_attr: ["data-player-id", "data-id", "id"]
 
 formazione:
