@@ -198,6 +198,7 @@ class Runner:
             finally:
                 # Anche se il submit fallisce il registro va salvato: e'
                 # proprio la chiamata fallita quella che interessa vedere.
+                lega.record_storage_keys()
                 lega.save_api_trace()
 
     def _resolve_matchday(self, lega: LeagueClient) -> Matchday:

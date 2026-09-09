@@ -206,7 +206,8 @@ class LeagueClient:
                 if request.method.upper() in {"POST", "PUT", "PATCH"}:
                     body = request.post_data
                 trace.record_request(request.method, request.url, body,
-                                     request.resource_type)
+                                     request.resource_type,
+                                     request.all_headers())
             except Exception:  # noqa: BLE001
                 log.debug("richiesta non registrata", exc_info=True)
 
@@ -226,6 +227,23 @@ class LeagueClient:
         self._context.on("request", on_request)
         self._context.on("response", on_response)
         log.info("registrazione delle chiamate di rete attiva")
+
+    def record_storage_keys(self) -> None:
+        """Annota le chiavi di localStorage e sessionStorage.
+
+        Se l'API risponde 401 il token sta quasi sempre li'. Registriamo i
+        **nomi** delle chiavi, mai i valori: sapere dove guardare basta.
+        """
+        if self.trace is None or self._page is None:
+            return
+        try:
+            chiavi = self.page.evaluate(
+                "() => ({local: Object.keys(localStorage||{}),"
+                " session: Object.keys(sessionStorage||{})})"
+            )
+        except Exception:  # noqa: BLE001
+            return
+        self.trace.storage_keys = chiavi
 
     def save_api_trace(self) -> Path | None:
         """Scrive e logga il registro delle chiamate, se attivo."""
