@@ -16,6 +16,7 @@ CI risulta rosso e resta traccia dell'artifact di debug.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -25,13 +26,47 @@ from fantabot.deadline import SerieACalendar, effective_deadline
 from fantabot.http import client_from_config
 from fantabot.lega.client import LeagueClient, LeagueError, load_selectors
 from fantabot.lineup import LineupSettings, build_lineup
-from fantabot.models import Matchday, RunResult, SourceReport
-from fantabot.names import AliasMap
+from fantabot.models import Matchday, RosterPlayer, RunResult, SourceReport
+from fantabot.names import AliasMap, resolve_team
 from fantabot.notify import TelegramNotifier
 from fantabot.sources import REGISTRY, SourceContext
 from fantabot.sources.unavailability import UnavailabilityFeed, Unavailable
 
 log = logging.getLogger(__name__)
+
+
+def _resolve_roster_teams(
+    roster: list[RosterPlayer], teams_playing: set[str], aliases: AliasMap
+) -> list[RosterPlayer]:
+    """Porta le squadre della rosa nella stessa forma usata da fonti e calendario.
+
+    La lega scrive la squadra come sigla (`JUV`); fonti e calendario usano il
+    nome completo (`Juventus`). Senza allinearle nessun giocatore combacia con
+    le probabili e ognuno prende il malus di "squadra non in campo".
+    """
+    if not teams_playing:
+        return roster
+
+    risolti: list[RosterPlayer] = []
+    cambiati = 0
+    non_risolti: set[str] = set()
+    for player in roster:
+        team = resolve_team(player.team, teams_playing, aliases)
+        if team != player.team:
+            cambiati += 1
+            risolti.append(replace(player, team=team))
+            continue
+        if player.team and team not in teams_playing:
+            non_risolti.add(player.team)
+        risolti.append(player)
+
+    if cambiati:
+        log.info("squadre della rosa risolte dalla sigla al nome completo: %d", cambiati)
+    if non_risolti:
+        # Non e' per forza un errore: puo' essere una squadra che riposa.
+        log.warning("sigle non riconosciute fra le squadre di giornata: %s",
+                    ", ".join(sorted(non_risolti)))
+    return risolti
 
 
 class RunAborted(RuntimeError):
@@ -119,6 +154,11 @@ class Runner:
             matchday = self._resolve_matchday(lega)
             result.matchday = matchday
             self._check_deadline(matchday)
+
+            aliases = AliasMap.load(
+                self.cfg.get("aggregation.matching.alias_file", "config/aliases.yaml")
+            )
+            roster = _resolve_roster_teams(roster, matchday.teams, aliases)
 
             reports, unavailable = self._collect_sources(raw_dir)
             result.sources = reports

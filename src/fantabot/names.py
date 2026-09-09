@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -95,6 +96,36 @@ def _flatten_aliases(mapping: dict) -> dict[str, str]:
         for variant in variants or []:
             out[normalize(str(variant))] = canon_norm
     return out
+
+
+def resolve_team(value: str, known: Iterable[str], aliases: AliasMap | None = None) -> str:
+    """Risolve un codice squadra verso il nome completo.
+
+    La pagina della lega scrive la squadra come sigla di tre lettere (`JUV`,
+    `FIO`), mentre calendario e fonti usano il nome per esteso (`Juventus`,
+    `Fiorentina`). Senza questa conversione nessun giocatore combacia con le
+    probabili e tutti risultano "squadra non in campo".
+
+    La sigla viene risolta come prefisso del nome completo, che e' la regola
+    che il sito segue; l'esito conta solo se e' **univoco** fra le squadre
+    note, cosi' un prefisso ambiguo non porta a un'attribuzione sbagliata.
+    Un `value` non riconosciuto viene restituito invariato.
+    """
+    if not value:
+        return value
+    aliases = aliases or AliasMap()
+
+    target = aliases.canonical_team(value)
+    by_norm: dict[str, str] = {aliases.canonical_team(t): t for t in known}
+    if target in by_norm:
+        return by_norm[target]
+
+    matches = [original for norm, original in by_norm.items() if norm.startswith(target)]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        log.debug("sigla %r ambigua fra %s: la lascio com'e'", value, matches)
+    return value
 
 
 class PlayerMatcher:
