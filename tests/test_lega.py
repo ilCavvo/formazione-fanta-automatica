@@ -451,3 +451,33 @@ class TestModificatoreDifesa:
     def test_gli_altri_modificatori_restano_spenti(self, real_config):
         for nome in ("portiere", "centrocampo", "attacco"):
             assert real_config.get(f"league.modifiers.modificatore_{nome}") is False
+
+
+class TestRaccoltaDegliHeaderDellApi:
+    """Gli header di autenticazione servono a ogni run, non solo in indagine.
+
+    Erano legati a `--capture-api`, il flag di diagnostica: cosi' l'API
+    rispondeva 401 in tutti i run normali e si ripiegava sempre sul browser.
+    """
+
+    def _sorgente(self) -> str:
+        import pathlib
+
+        import fantabot.lega.client as client
+
+        return pathlib.Path(client.__file__).read_text(encoding="utf-8")
+
+    def test_gli_ascoltatori_si_agganciano_sempre(self):
+        sorgente = self._sorgente()
+        assert "self._attach_listeners()" in sorgente
+        # Nessuna condizione sulla riga precedente: si aggancia e basta.
+        righe = sorgente.splitlines()
+        indice = next(i for i, r in enumerate(righe)
+                      if "self._attach_listeners()" in r)
+        assert "if" not in righe[indice - 1]
+
+    def test_il_client_ha_il_raccoglitore(self):
+        assert "self.auth_headers = AuthHeaders()" in self._sorgente()
+
+    def test_l_api_riceve_gli_header_raccolti(self):
+        assert "headers=self.auth_headers.as_dict()" in self._sorgente()

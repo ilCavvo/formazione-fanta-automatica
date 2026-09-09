@@ -31,6 +31,7 @@ import yaml
 
 from fantabot.lega.api import ApiError, LeagueApi
 from fantabot.lega.apitrace import ApiTrace
+from fantabot.lega.authheaders import AuthHeaders
 from fantabot.lega.discovery import PageSummary, summarise, to_markdown
 from fantabot.models import Lineup, Role, RosterPlayer
 
@@ -158,6 +159,9 @@ class LeagueClient:
         self.trace = ApiTrace(secrets=(username, password)) if capture_api else None
         #: Se true si prova prima l'API, con il browser come ripiego.
         self.use_api = use_api
+        #: Header che l'app manda all'API: si copiano dal browser, non si
+        #: indovinano. Senza, l'API risponde 401.
+        self.auth_headers = AuthHeaders()
         self.tz = ZoneInfo(timezone)
 
         self._playwright = None
@@ -186,28 +190,38 @@ class LeagueClient:
         )
         self._context.set_default_timeout(self.timeout_ms)
         self._page = self._context.new_page()
-        if self.trace is not None:
-            self._attach_trace()
+        self._attach_listeners()
 
-    def _attach_trace(self) -> None:
+    def _attach_listeners(self) -> None:
         """Ascolta le chiamate di rete dell'app.
 
+        Serve a due cose: raccogliere gli header di autenticazione dell'API
+        (sempre) e registrare il traffico per l'indagine (solo se richiesto).
+
         Gli ascoltatori non devono mai far fallire il run: qualunque errore
-        nella registrazione viene ingoiato, perche' e' uno strumento di
-        indagine, non parte del lavoro.
+        viene ingoiato, perche' sono un supporto, non parte del lavoro.
         """
         trace = self.trace
-        if trace is None or self._context is None:
+        if self._context is None:
             return
 
         def on_request(request) -> None:
+            try:
+                headers = request.all_headers()
+            except Exception:  # noqa: BLE001
+                headers = {}
+            try:
+                self.auth_headers.observe(request.url, headers)
+            except Exception:  # noqa: BLE001
+                log.debug("header non raccolti", exc_info=True)
+            if trace is None:
+                return
             try:
                 body = None
                 if request.method.upper() in {"POST", "PUT", "PATCH"}:
                     body = request.post_data
                 trace.record_request(request.method, request.url, body,
-                                     request.resource_type,
-                                     request.all_headers())
+                                     request.resource_type, headers)
             except Exception:  # noqa: BLE001
                 log.debug("richiesta non registrata", exc_info=True)
 
@@ -225,8 +239,9 @@ class LeagueClient:
                 log.debug("risposta non registrata", exc_info=True)
 
         self._context.on("request", on_request)
-        self._context.on("response", on_response)
-        log.info("registrazione delle chiamate di rete attiva")
+        if trace is not None:
+            self._context.on("response", on_response)
+            log.info("registrazione delle chiamate di rete attiva")
 
     def record_storage_keys(self) -> None:
         """Annota le chiavi di localStorage e sessionStorage.
@@ -700,7 +715,17 @@ class LeagueClient:
             raise ApiError(f"titolari senza identificativo: {', '.join(senza)}")
         bench = _player_ids(lineup.bench)
 
-        api = LeagueApi(self._context.request)
+        if not self.auth_headers.ready:
+            # Meglio saperlo qui che leggere un 401 e non capire perche': gli
+            # header si raccolgono navigando, quindi se mancano vuol dire che
+            # l'app non ha ancora chiamato l'API.
+            raise ApiError(
+                "header di autenticazione non raccolti: l'app non ha chiamato "
+                f"{AuthHeaders().host} mentre navigavo"
+            )
+        log.info("chiamo l'API con gli header dell'app (%s)",
+                 self.auth_headers.describe())
+        api = LeagueApi(self._context.request, headers=self.auth_headers.as_dict())
         current = api.read_lineup(idcomp)
 
         if dry_run:
