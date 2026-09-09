@@ -31,7 +31,8 @@ API_HOST = "apileague.fantacalcio.it"
 #: Tutto il resto viene ricopiato, header di autenticazione compresi.
 PER_REQUEST_HEADERS = frozenset({
     "accept", "accept-encoding", "accept-language",
-    "cachable", "connection", "content-length", "content-type",
+    "cachable", "cache-control", "connection", "content-length",
+    "content-type", "pragma",
     "cookie", "host", "if-modified-since", "if-none-match",
     "origin", "priority", "referer", "user-agent",
 })

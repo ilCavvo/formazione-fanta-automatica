@@ -55,10 +55,12 @@ class TestCosaSiCopia:
         auth = AuthHeaders()
         auth.observe(URL_API, {**OSSERVATI, "content-length": "123",
                                "content-type": "application/json",
-                               "cookie": "sid=1", "sec-fetch-mode": "cors"})
+                               "cookie": "sid=1", "sec-fetch-mode": "cors",
+                               "cache-control": "no-cache", "pragma": "no-cache"})
         copiati = auth.as_dict()
         for indesiderato in ("cachable", "priority", "content-length",
-                             "content-type", "cookie", "sec-fetch-mode"):
+                             "content-type", "cookie", "sec-fetch-mode",
+                             "cache-control", "pragma"):
             assert indesiderato not in copiati
 
     def test_copia_anche_header_che_non_conosciamo(self):

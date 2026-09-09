@@ -197,3 +197,34 @@ class TestChiaviDiStorage:
         t = trace()
         t.record_request("GET", f"{API}/v1/x", None, "xhr")
         assert "Dove l'app tiene" not in t.to_markdown()
+
+
+class TestChiaviSensibiliPerContenuto:
+    """Il confronto esatto lasciava passare `token_auth`.
+
+    La risposta di `POST /onboarding/v1/login` contiene `token_auth` e
+    `state_auth`: nessuna delle due era uguale a una chiave vietata, quindi il
+    token e' finito nel log del job — che e' pubblico. Ora una chiave e'
+    sensibile se **contiene** una parola vietata.
+    """
+
+    def _forma(self, corpo):
+        return ApiTrace().shape(corpo)
+
+    def test_il_token_del_login_non_esce(self):
+        forma = self._forma({"token_auth": "3587F44616A0531B15680D86693CA635",
+                             "state_auth": 1603484913406})
+        assert forma["token_auth"] == "***"
+        assert forma["state_auth"] == "***"
+
+    def test_vale_anche_annidato(self):
+        forma = self._forma({"data": {"user": {"access_token": "abc"}}})
+        assert forma["data"]["user"] == "***"
+
+    def test_i_campi_normali_restano_leggibili(self):
+        """Il registro serve a capire il formato: la forma deve restare utile."""
+        forma = self._forma({"mdl": "433", "idcomp": 301229, "visb": True})
+        assert forma == {"mdl": "433", "idcomp": 301229, "visb": True}
+
+    def test_meglio_nascondere_troppo_che_troppo_poco(self):
+        assert self._forma({"authorized": True})["authorized"] == "***"

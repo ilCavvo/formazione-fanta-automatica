@@ -25,7 +25,9 @@ from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
-#: Chiavi il cui valore non deve mai comparire nel registro.
+#: Parole che rendono sensibile una chiave. Il confronto e' **per contenuto**,
+#: non per uguaglianza: la risposta del login porta `token_auth`, che con il
+#: confronto esatto non somigliava a nessuna di queste ed e' finita nel log.
 SENSITIVE_KEYS = frozenset({
     "password", "passwd", "pwd", "pass",
     "token", "access_token", "refresh_token", "id_token", "jwt",
@@ -143,7 +145,7 @@ class ApiTrace:
         if isinstance(value, dict):
             out: dict[str, Any] = {}
             for key, item in value.items():
-                if str(key).lower() in SENSITIVE_KEYS:
+                if _is_sensitive(str(key)):
                     out[str(key)] = _REDACTED
                 else:
                     out[str(key)] = self.shape(item, depth + 1)
@@ -243,6 +245,17 @@ def _header_names(headers: dict[str, str]) -> list[str]:
         name.lower() for name in headers
         if name.lower() not in _BORING_HEADERS and not name.lower().startswith("sec-")
     )
+
+
+def _is_sensitive(key: str) -> bool:
+    """Una chiave e' sensibile se **contiene** una delle parole vietate.
+
+    Meglio nascondere qualcosa di innocuo che lasciar uscire un token: il
+    registro serve a capire il formato delle chiamate, e la forma resta
+    leggibile anche con un valore in meno.
+    """
+    minuscola = key.lower()
+    return any(parola in minuscola for parola in SENSITIVE_KEYS)
 
 
 def _parse_json(body: str | None) -> Any:
