@@ -157,8 +157,19 @@ formazione:
     - "button[type=submit].salva"
     - "button:has-text('Salva formazione')"
     - "button:has-text('Salva')"
-  # Conferma visibile dopo il salvataggio.
-  save_confirmation: [".alert-success", ".toast-success", "text=Formazione salvata"]
+  # Conferma visibile dopo il salvataggio. L'app e' ng-zorro: le notifiche
+  # sono `.ant-message` / `.ant-notification`, non i generici `.alert-success`
+  # di Bootstrap con cui erano stati scritti a intuito.
+  save_confirmation:
+    - ".ant-message-success"
+    - ".ant-notification-notice-success"
+    - ".ant-message"
+    - ".ant-notification-notice"
+    - "nz-message"
+    - "text=/formazione salvata/i"
+    - "text=/salvata con successo/i"
+    - ".alert-success"
+    - ".toast-success"
 
 regolamento:
   # Contenitore del testo del regolamento, da cui dedurre i modificatori.
