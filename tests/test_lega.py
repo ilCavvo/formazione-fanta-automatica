@@ -194,3 +194,38 @@ class TestAttesaDelLogin:
         from fantabot.lega.client import LOGIN_WAIT_MS
 
         assert LOGIN_WAIT_MS >= 10_000
+
+
+class TestAtteseDiNavigazione:
+    """`networkidle` non e' utilizzabile su queste pagine.
+
+    Ads e tracker tengono connessioni aperte, quindi la rete non e' mai
+    davvero ferma: la navigazione scadeva dopo 30s su una pagina che si era
+    caricata subito. Il segnale affidabile e' `domcontentloaded`.
+    """
+
+    def test_nessuna_attesa_su_networkidle_nel_codice(self):
+        import pathlib
+
+        import fantabot.lega.client as client
+
+        sorgente = pathlib.Path(client.__file__).read_text(encoding="utf-8")
+        # Cerchiamo le *chiamate*, non le menzioni: i commenti e le docstring
+        # che spiegano perche' non lo usiamo devono poter restare.
+        chiamate = [
+            riga.strip()
+            for riga in sorgente.splitlines()
+            if 'wait_until="networkidle"' in riga
+            or 'wait_for_load_state("networkidle"' in riga
+        ]
+        assert chiamate == [], f"attese su networkidle rimaste: {chiamate}"
+
+    def test_i_timeout_sono_coerenti(self):
+        from fantabot.lega.client import (
+            LOGIN_WAIT_MS,
+            NAV_TIMEOUT_MS,
+            SETTLE_TIMEOUT_MS,
+        )
+
+        # L'assestamento e' un'attesa accessoria: deve restare la piu' corta.
+        assert SETTLE_TIMEOUT_MS < LOGIN_WAIT_MS < NAV_TIMEOUT_MS
