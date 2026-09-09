@@ -590,7 +590,7 @@ class LeagueClient:
                     team=team,
                     role=role,
                     order=index,
-                    player_id=_first_attr(row, cfg.get("player_id_attr", [])),
+                    player_id=_player_id(row, cfg),
                 )
             )
 
@@ -977,6 +977,36 @@ def _first_value(row, candidates: list[str]) -> str:
         if value:
             return value
     return ""
+
+
+#: L'avatar del giocatore e' servito come `<id>.png`: e' l'unico posto della
+#: pagina dove l'identificativo numerico compare, ed e' quello che l'API usa.
+_ID_IN_FILENAME = re.compile(r"(\d{2,})\.\w+$")
+
+
+def _player_id(row, cfg: dict[str, Any]) -> str | None:
+    """Identificativo del giocatore, per poterlo poi passare all'API.
+
+    Prima si prova un attributo esplicito; in mancanza si legge dal nome del
+    file dell'avatar (`.../6519.png`), che nella pagina della lega e' l'unico
+    posto in cui l'id compare.
+    """
+    explicit = _first_attr(row, cfg.get("player_id_attr", []))
+    if explicit and explicit.isdigit():
+        return explicit
+
+    for selector in cfg.get("player_id_image", []):
+        try:
+            node = row.locator(selector).first
+            if node.count() == 0:
+                continue
+            src = node.get_attribute("src") or ""
+        except Exception:  # noqa: BLE001
+            continue
+        match = _ID_IN_FILENAME.search(src.split("?")[0])
+        if match:
+            return match.group(1)
+    return explicit or None
 
 
 def _first_attr(row, candidates: list[str]) -> str | None:

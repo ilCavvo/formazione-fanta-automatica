@@ -143,6 +143,10 @@ rosa:
     - "span.team-name"
     - ".player-team"
   player_id_attr: ["data-player-id", "data-id", "id"]
+  # In mancanza di un attributo, l'id si legge dal nome del file dell'avatar
+  # (`.../6519.png`): e' l'identificativo che l'API della lega usa per
+  # schierare i giocatori.
+  player_id_image: ["img.select-none", "nz-avatar img", "img[src$='.png']"]
 
 formazione:
   # Testo con la scadenza, es. "Scadenza: 04/09/2026 20:45".

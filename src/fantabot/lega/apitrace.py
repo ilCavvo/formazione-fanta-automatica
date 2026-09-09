@@ -44,6 +44,9 @@ MAX_ITEMS = 2
 
 _REDACTED = "***"
 
+#: Host di soli asset: registrarli e' solo rumore.
+IGNORED_HOST_PREFIXES = ("static.", "content.", "cdn.", "img.")
+
 
 @dataclass
 class ApiCall:
@@ -77,7 +80,12 @@ class ApiTrace:
 
     def wants(self, url: str) -> bool:
         host = urlparse(url).netloc
-        return any(host == h or host.endswith("." + h) for h in self.hosts)
+        if not any(host == h or host.endswith("." + h) for h in self.hosts):
+            return False
+        # I CDN di icone e immagini riempiono il registro senza dire nulla su
+        # come si salva una formazione, e spingono fuori dal log le chiamate
+        # che contano.
+        return not any(host.startswith(p) for p in IGNORED_HOST_PREFIXES)
 
     def record_request(self, method: str, url: str, body: str | None,
                        resource_type: str = "") -> ApiCall | None:
@@ -189,6 +197,14 @@ class ApiTrace:
                 lines.append(json.dumps(call.response_shape, indent=2, ensure_ascii=False))
                 lines.append("```")
             lines.append("")
+
+        # L'indice va in fondo di proposito: il log del job viene letto dalla
+        # coda, quindi cio' che sta in cima e' la prima cosa a sparire.
+        lines.append("## Indice delle chiamate")
+        lines.append("")
+        for call in self.calls:
+            stato = call.status if call.status is not None else "?"
+            lines.append(f"- `{call.method} {call.host}{call.path}` -> {stato}")
         return "\n".join(lines)
 
 
