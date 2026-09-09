@@ -12,10 +12,11 @@ import json
 import pytest
 
 from fantabot.lega.api import (
-    PASSTHROUGH_FIELDS,
+    REQUIRED_FIELDS,
     ApiError,
     LeagueApi,
     module_to_api,
+    unwrap,
 )
 
 #: Risposta osservata davvero su GET /gaming/v1/teamLineup/visualizza/A/301229
@@ -47,20 +48,24 @@ class FintoRequest:
         self._get = get
         self._post = post
         self.chiamate: list[tuple[str, str, dict | None]] = []
+        self.header: list[dict] = []
 
-    def get(self, url, **kw):
+    def get(self, url, headers=None, **kw):
         self.chiamate.append(("GET", url, None))
+        self.header.append(dict(headers or {}))
+        # Con piu' letture (rilettura di verifica) la stessa risposta va bene.
         return self._get
 
-    def post(self, url, data=None, **kw):
+    def post(self, url, data=None, headers=None, **kw):
         corpo = json.loads(data) if data else None
         self.chiamate.append(("POST", url, corpo))
+        self.header.append(dict(headers or {}))
         return self._post
 
 
-def api(get=None, post=None) -> tuple[LeagueApi, FintoRequest]:
+def api(get=None, post=None, headers=None) -> tuple[LeagueApi, FintoRequest]:
     request = FintoRequest(get=get, post=post)
-    return LeagueApi(request), request
+    return LeagueApi(request, headers=headers), request
 
 
 class TestModulo:
@@ -107,8 +112,30 @@ class TestSalvataggio:
         client.save_lineup(LETTURA, self.STARTS, self.BENCH, "4-3-3")
         _, url, corpo = request.chiamate[0]
         assert url.endswith("/gaming/v1/teamLineup/A")
-        for campo in PASSTHROUGH_FIELDS:
+        for campo in REQUIRED_FIELDS:
             assert corpo[campo] == LETTURA[campo]
+
+    def test_rimanda_indietro_anche_i_campi_che_non_conosciamo(self):
+        """Elencare noi i campi da tenere vorrebbe dire decidere quali contano."""
+        client, request = api(post=self._risposta_ok())
+        lettura = {**LETTURA, "lucnt": 8, "useId": 4129046, "pos": 0}
+        client.save_lineup(lettura, self.STARTS, self.BENCH, "4-3-3")
+        corpo = request.chiamate[0][2]
+        assert corpo["lucnt"] == 8
+        assert corpo["useId"] == 4129046
+
+    def test_non_rimanda_il_marcatempo_del_sito(self):
+        """`ldate` lo scrive il sito a ogni salvataggio."""
+        client, request = api(post=self._risposta_ok())
+        client.save_lineup({**LETTURA, "ldate": "20260909205644666"},
+                           self.STARTS, self.BENCH, "4-3-3")
+        assert "ldate" not in request.chiamate[0][2]
+
+    def test_swtcmdl_a_null_non_blocca_l_invio(self):
+        """Il sito lo manda davvero a `null`: e' un valore, non un campo che manca."""
+        client, _ = api(post=self._risposta_ok())
+        assert client.save_lineup({**LETTURA, "swtcMdl": None},
+                                  self.STARTS, self.BENCH, "4-3-3")
 
     def test_sostituisce_undici_panchina_e_modulo(self):
         client, request = api(post=self._risposta_ok())
@@ -178,3 +205,82 @@ class TestControlliPrimaDiInviare:
         parziale = {k: v for k, v in LETTURA.items() if k != "cmday"}
         with pytest.raises(ApiError, match="cmday"):
             client.save_lineup(parziale, self.STARTS, [], "4-3-3")
+
+
+class TestHeaderDiAutenticazione:
+    """Senza `authorization` e `app_key` l'API risponde 401, cookie o non cookie."""
+
+    STARTS = list(range(101, 112))
+
+    def test_sulla_lettura(self):
+        client, request = api(get=FintaRisposta(LETTURA),
+                              headers={"authorization": "Bearer x", "app_key": "k"})
+        client.read_lineup(301229)
+        assert request.header[0]["authorization"] == "Bearer x"
+        assert request.header[0]["app_key"] == "k"
+
+    def test_sul_salvataggio_insieme_al_content_type(self):
+        risposta = FintaRisposta({"mdl": "433", "starts": self.STARTS})
+        client, request = api(post=risposta, headers={"authorization": "Bearer x"})
+        client.save_lineup(LETTURA, self.STARTS, [], "4-3-3")
+        inviati = request.header[0]
+        assert inviati["authorization"] == "Bearer x"
+        assert inviati["Content-Type"] == "application/json"
+
+
+class TestIncarto:
+    """La lettura arriva dentro `teamLineupDto`, insieme all'elenco giocatori."""
+
+    STARTS = list(range(101, 112))
+
+    def test_toglie_l_incarto(self):
+        client, _ = api(get=FintaRisposta({"teamLineupDto": LETTURA,
+                                           "lineUpInfo": [{"pid": 1}]}))
+        assert client.read_lineup(301229)["mdl"] == "433"
+
+    def test_senza_incarto_non_cambia_niente(self):
+        assert unwrap(LETTURA) is LETTURA
+
+    def test_risposta_che_non_e_una_formazione(self):
+        with pytest.raises(ApiError, match="list"):
+            unwrap([1, 2, 3])
+
+    def test_salvataggio_incartato(self):
+        salvato = {"teamLineupDto": {"mdl": "433", "starts": self.STARTS}}
+        client, _ = api(post=FintaRisposta(salvato))
+        assert client.save_lineup(LETTURA, self.STARTS, [], "4-3-3")
+
+
+class TestVerificaRileggendo:
+    """Se la risposta al salvataggio non contiene la formazione, si rilegge.
+
+    E' proprio la verifica che mancava al browser: li' si cercava un messaggio
+    a schermo e il run riusciva anche salvando un modulo diverso.
+    """
+
+    STARTS = list(range(101, 112))
+
+    def test_rilegge_quando_la_risposta_conferma_e_basta(self):
+        client, request = api(
+            get=FintaRisposta({"teamLineupDto": {"mdl": "433",
+                                                 "starts": self.STARTS,
+                                                 "ldate": "20260909203930174"}}),
+            post=FintaRisposta({"esito": "ok"}),
+        )
+        esito = client.save_lineup(LETTURA, self.STARTS, [], "4-3-3")
+        assert esito.saved_at == "20260909203930174"
+        assert [m for m, _, _ in request.chiamate] == ["POST", "GET"]
+
+    def test_la_rilettura_smaschera_un_modulo_diverso(self):
+        client, _ = api(
+            get=FintaRisposta({"mdl": "352", "starts": self.STARTS}),
+            post=FintaRisposta({"esito": "ok"}),
+        )
+        with pytest.raises(ApiError, match="352"):
+            client.save_lineup(LETTURA, self.STARTS, [], "4-3-3")
+
+    def test_non_rilegge_se_la_risposta_basta(self):
+        client, request = api(post=FintaRisposta({"mdl": "433",
+                                                  "starts": self.STARTS}))
+        client.save_lineup(LETTURA, self.STARTS, [], "4-3-3")
+        assert [m for m, _, _ in request.chiamate] == ["POST"]
