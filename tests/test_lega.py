@@ -316,9 +316,73 @@ class TestSelettoriRosaReali:
         assert not any("lineup-slot" in s for s in row)
 
     def test_nome_e_ruolo(self, selectors):
-        assert selectors["rosa"]["name"][0] == "span.player-name"
-        assert selectors["rosa"]["role"][0] == "div.role"
+        """Aggiornati dopo aver visto il campione con gli attributi: il nome
+        sta nel leaf `span.truncate` e il ruolo in `data-role`, non nel testo."""
+        assert selectors["rosa"]["name"][0] == "span.truncate"
+        assert selectors["rosa"]["role"][0].endswith("@data-role")
 
     def test_la_squadra_e_best_effort(self, selectors):
         """Per un infortunato il riquadro del prossimo turno non c'e'."""
         assert "ui-next-match-progress" in selectors["rosa"]["team"][0]
+
+
+class TestSelettoriConAttributo:
+    """`selettore@attributo` legge un attributo invece del testo.
+
+    Serve al ruolo, che nella pagina della lega e' un'icona con il valore in
+    `data-role`: leggendo il testo si otteneva stringa vuota e ogni riga
+    veniva scartata, con 25 righe trovate e rosa vuota.
+    """
+
+    def test_il_ruolo_si_legge_da_data_role(self, selectors):
+        role = selectors["rosa"]["role"]
+        assert role[0].endswith("@data-role")
+        assert "[data-role]" in role[0]
+
+    def test_il_nome_viene_dal_leaf_con_il_testo(self, selectors):
+        assert selectors["rosa"]["name"][0] == "span.truncate"
+
+    def test_la_sintassi_si_divide_su_chiocciola(self):
+        """La divisione deve reggere anche i candidati senza attributo."""
+        for spec, atteso in [
+            ("[data-role]@data-role", ("[data-role]", "data-role")),
+            ("div.role", ("div.role", "")),
+            ("a[href='x@y']", ("a[href='x", "y']")),  # limite noto, documentato
+        ]:
+            selettore, _, attributo = spec.partition("@")
+            assert (selettore, attributo) == atteso
+
+    def test_first_value_gestisce_testo_e_attributo(self):
+        """Verifica il comportamento su un finto locator, senza browser."""
+        from fantabot.lega.client import _first_value
+
+        class FintoNodo:
+            def __init__(self, testo="", attributi=None):
+                self._testo = testo
+                self._attributi = attributi or {}
+
+            def count(self):
+                return 1
+
+            def inner_text(self):
+                return self._testo
+
+            def get_attribute(self, nome):
+                return self._attributi.get(nome)
+
+        class FintaRiga:
+            def __init__(self, nodi):
+                self._nodi = nodi
+
+            def locator(self, selettore):
+                nodo = self._nodi.get(selettore, FintoNodo())
+                return type("L", (), {"first": nodo})()
+
+        riga = FintaRiga({
+            "div.role": FintoNodo(testo=""),                       # icona, niente testo
+            "[data-role]": FintoNodo(attributi={"data-role": "A"}),
+            "span.truncate": FintoNodo(testo="  Camarda  "),
+        })
+        assert _first_value(riga, ["div.role", "[data-role]@data-role"]) == "A"
+        assert _first_value(riga, ["span.truncate"]) == "Camarda"
+        assert _first_value(riga, ["span.assente"]) == ""
