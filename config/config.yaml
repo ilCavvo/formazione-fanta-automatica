@@ -77,9 +77,11 @@ league:
 
   modifiers:
     # Modificatore difesa: se attivo conviene schierare 4 (o 5) difensori.
-    # Con autodetect_rules: true questo valore puo' essere sovrascritto da
-    # quanto letto nel regolamento della lega.
-    modificatore_difesa: false
+    # ATTIVO, e non e' un'ipotesi: il registro delle chiamate della lega
+    # (onboarding/v1/league/settings/calculate) riporta
+    #   "smodd": {"smodlu": 7.75, "smodld": 6, "smodty": 1, "smoddg": true}
+    # mentre gli altri modificatori (smodg, smodm, smodf, smodp) sono null.
+    modificatore_difesa: true
     modificatore_portiere: false
     modificatore_centrocampo: false
     modificatore_attacco: false

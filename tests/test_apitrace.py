@@ -122,3 +122,32 @@ class TestRisposte:
 class TestReportVuoto:
     def test_lo_dice(self):
         assert "Nessuna chiamata registrata" in trace().to_markdown()
+
+
+class TestRumoreDegliAsset:
+    """Icone e immagini riempirebbero il registro senza dire nulla di utile.
+
+    Peggio: spingono fuori dalla coda del log le chiamate che contano, ed e'
+    dalla coda che il log del job si legge.
+    """
+
+    def test_scarta_i_cdn_di_asset(self):
+        t = trace()
+        assert t.wants("https://static.fantacalcio.it/icons/percent.svg") is False
+        assert t.wants("https://content.fantacalcio.it/img/x.png") is False
+
+    def test_ma_tiene_l_api(self):
+        assert trace().wants(f"{API}/gaming/v1/teamLineup/A") is True
+
+
+class TestIndice:
+    def test_l_indice_sta_in_fondo(self):
+        """Il log si legge dalla coda: cio' che sta in cima sparisce per primo."""
+        t = trace()
+        t.record_request("POST", f"{API}/gaming/v1/teamLineup/A", "{}", "xhr")
+        t.record_response(f"{API}/gaming/v1/teamLineup/A", "POST", 200, "{}")
+        report = t.to_markdown()
+        assert "## Indice delle chiamate" in report
+        indice = report.index("## Indice delle chiamate")
+        assert indice > report.index("## POST")
+        assert "gaming/v1/teamLineup/A` -> 200" in report[indice:]

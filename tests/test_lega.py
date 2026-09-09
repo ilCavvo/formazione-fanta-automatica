@@ -417,3 +417,35 @@ class TestConfermaSalvataggio:
 
         sorgente = inspect.getsource(LeagueClient.submit_lineup)
         assert "potrebbe essere comunque stata salvata" in sorgente
+
+
+class TestIdGiocatore:
+    """L'id numerico serve all'API per schierare: va estratto dalla pagina."""
+
+    def test_lo_legge_dal_nome_del_file_dell_avatar(self):
+        from fantabot.lega.client import _ID_IN_FILENAME
+
+        for src, atteso in [
+            ("/campioncini/6519.png", "6519"),
+            ("https://x/y/4463.png?v=2", "4463"),
+        ]:
+            match = _ID_IN_FILENAME.search(src.split("?")[0])
+            assert match and match.group(1) == atteso
+
+    def test_ignora_i_file_senza_id(self):
+        from fantabot.lega.client import _ID_IN_FILENAME
+
+        assert _ID_IN_FILENAME.search("/logo.svg") is None
+
+    def test_i_selettori_dell_avatar_sono_configurati(self, selectors):
+        assert selectors["rosa"]["player_id_image"]
+
+
+class TestModificatoreDifesa:
+    def test_e_attivo_in_config(self, real_config):
+        """Il registro delle chiamate della lega lo dice: smodd non e' null."""
+        assert real_config.get("league.modifiers.modificatore_difesa") is True
+
+    def test_gli_altri_modificatori_restano_spenti(self, real_config):
+        for nome in ("portiere", "centrocampo", "attacco"):
+            assert real_config.get(f"league.modifiers.modificatore_{nome}") is False
