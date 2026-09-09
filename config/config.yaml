@@ -8,9 +8,17 @@
 # --- Sicurezza / modalita' -------------------------------------------------
 run:
   # Se true calcola la formazione e manda la notifica Telegram ma NON invia
-  # nulla al sito. Lascia true finche' non ti fidi dell'automazione.
+  # nulla al sito.
+  #
+  # Ora e' false: l'invio via API e' stato provato per davvero e il sito ha
+  # confermato (`formazione 4-3-3 inviata via API e verificata nella
+  # risposta`, run 34409353250). Con true i run automatici calcolerebbero la
+  # formazione senza mai schierarla — cioe' non farebbero il loro mestiere.
+  #
+  # Per una prova senza rischi non serve cambiare questo file: lancia la
+  # action a mano con dry_run spuntato, oppure `--dry-run` da riga di comando.
   # Override runtime: env var DRY_RUN=true|false, oppure --dry-run/--no-dry-run.
-  dry_run: true
+  dry_run: false
 
   # Cartella dove finiscono log e artefatti del run (caricati come artifact CI).
   output_dir: "out"
