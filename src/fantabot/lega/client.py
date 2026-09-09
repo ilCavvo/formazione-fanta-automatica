@@ -41,6 +41,13 @@ _DEADLINE_TEXT = re.compile(
 )
 
 
+#: Timeout di navigazione. Generoso, ma su `domcontentloaded`, non su
+#: `networkidle`: con ads e tracker sempre attivi la rete non si ferma mai.
+NAV_TIMEOUT_MS = 45_000
+
+#: Attesa breve e tollerante perche' la pagina finisca di renderizzare.
+SETTLE_TIMEOUT_MS = 8_000
+
 #: Quanto aspettare che il login produca un effetto (XHR + cambio rotta).
 LOGIN_WAIT_MS = 15_000
 
@@ -279,8 +286,25 @@ class LeagueClient:
         overlay che intercetta i click, quindi bloccherebbe allo stesso modo il
         salvataggio della formazione.
         """
-        self.page.goto(url, wait_until="networkidle")
+        # `networkidle` non va usato qui: queste pagine tengono aperte
+        # connessioni di ads e tracker, quindi la rete non e' mai davvero
+        # ferma e la goto scade dopo 30s su una pagina che in realta' si e'
+        # caricata subito. `domcontentloaded` e' il segnale affidabile.
+        self.page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        self._settle()
         self._dismiss_consent()
+
+    def _settle(self) -> None:
+        """Lascia un momento alla pagina per finire di renderizzare.
+
+        Nessuna attesa di rete: solo l'evento `load`, con un timeout corto e
+        tollerante, piu' una pausa breve per le app che montano dopo.
+        """
+        try:
+            self.page.wait_for_load_state("load", timeout=SETTLE_TIMEOUT_MS)
+        except Exception:  # noqa: BLE001 - non tutte le pagine emettono `load`
+            log.debug("evento load non arrivato entro %dms", SETTLE_TIMEOUT_MS)
+        self.page.wait_for_timeout(500)
 
     def _dismiss_consent(self) -> None:
         """Accetta il banner dei consensi, o lo rimuove dal DOM.
@@ -382,9 +406,9 @@ class LeagueClient:
             log.info("dopo %.0fs siamo ancora su %s",
                      LOGIN_WAIT_MS / 1000, self.page.url)
         try:
-            self.page.wait_for_load_state("networkidle", timeout=LOGIN_WAIT_MS)
+            self.page.wait_for_load_state("load", timeout=SETTLE_TIMEOUT_MS)
         except Exception:  # noqa: BLE001 - alcune pagine restano "occupate"
-            log.debug("networkidle non raggiunto dopo il submit", exc_info=True)
+            log.debug("evento load non arrivato dopo il submit", exc_info=True)
 
     def _submit_login_form(self, cfg: dict[str, Any]) -> None:
         """Invia il form di login.
@@ -564,7 +588,7 @@ class LeagueClient:
                 "in config/selectors.yaml."
             )
         self._click(button, "bottone di salvataggio")
-        self.page.wait_for_load_state("networkidle")
+        self._settle()
 
         confirmed = self._any_visible(cfg.get("save_confirmation", []))
         self.save_artifacts("post-salvataggio")
