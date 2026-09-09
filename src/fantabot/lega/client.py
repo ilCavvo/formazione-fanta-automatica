@@ -518,9 +518,9 @@ class LeagueClient:
 
         roster: list[RosterPlayer] = []
         for index, row in enumerate(rows):
-            name = _first_text(row, cfg["name"])
-            role_raw = _first_text(row, cfg["role"])
-            team = _first_text(row, cfg["team"])
+            name = _first_value(row, cfg["name"])
+            role_raw = _first_value(row, cfg["role"])
+            team = _first_value(row, cfg["team"])
             if not name or not role_raw:
                 continue
             try:
@@ -893,16 +893,26 @@ def parse_rules_text(text: str) -> LeagueRules:
     return rules
 
 
-def _first_text(row, candidates: list[str]) -> str:
-    for selector in candidates or []:
+def _first_value(row, candidates: list[str]) -> str:
+    """Primo valore utile fra i candidati, dal testo o da un attributo.
+
+    Un candidato puo' essere scritto `selettore@attributo`: serve perche' non
+    tutto e' testo. Il ruolo, per esempio, e' reso come icona e il suo valore
+    vive in `data-role`, quindi leggendo il testo si otterrebbe stringa vuota
+    e la riga verrebbe scartata.
+    """
+    for spec in candidates or []:
+        selector, _, attribute = spec.partition("@")
         node = row.locator(selector).first
         try:
-            if node.count() > 0:
-                text = (node.inner_text() or "").strip()
-                if text:
-                    return text
-        except Exception:  # noqa: BLE001
+            if node.count() == 0:
+                continue
+            raw = node.get_attribute(attribute) if attribute else node.inner_text()
+        except Exception:  # noqa: BLE001 - candidato non utilizzabile
             continue
+        value = (raw or "").strip()
+        if value:
+            return value
     return ""
 
 

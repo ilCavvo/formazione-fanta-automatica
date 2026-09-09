@@ -123,13 +123,23 @@ rosa:
     - "section.cdk-drop-list ui-player-card"
     - "ui-player-card"
     - "table.player-list tbody tr"
-  role: ["div.role", "ui-role", "ui-player-role", "[class*=role]"]
-  name: ["span.player-name", "span.truncate", ".player-name"]
+  # Il ruolo non e' testo: e' un'icona con il valore in `data-role`
+  # (`div.game-type-1[data-role=A]`). La sintassi `selettore@attributo` lo
+  # legge dall'attributo invece che dal contenuto.
+  role:
+    - "[data-role]@data-role"
+    - "div.game-type-1@data-role"
+    - "div.role"
+    - "ui-role"
+  # `span.player-name` e' il contenitore, ma il testo sta nel `span.truncate`
+  # interno: e' quello che il campione della diagnostica mostra valorizzato.
+  name: ["span.truncate", "span.player-name", ".player-name"]
   # Attenzione: la squadra sta nel riquadro del prossimo turno, che per un
   # infortunato viene sostituito dalla dicitura "Infortunato". Puo' quindi
   # mancare, e il matching dei nomi deve reggerlo (vedi require_same_team).
   team:
     - "ui-next-match-progress span.font-bold"
+    - "span.font-bold"
     - "span.team-name"
     - ".player-team"
   player_id_attr: ["data-player-id", "data-id", "id"]
