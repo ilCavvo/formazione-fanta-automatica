@@ -151,3 +151,49 @@ class TestIndice:
         indice = report.index("## Indice delle chiamate")
         assert indice > report.index("## POST")
         assert "gaming/v1/teamLineup/A` -> 200" in report[indice:]
+
+
+class TestHeader:
+    """Un 401 significa quasi sempre un header che il browser non mette da solo.
+
+    Registrarne i **nomi** dice come l'app si autentica; i valori sono
+    esattamente il token che non deve uscire.
+    """
+
+    def test_registra_i_nomi_non_i_valori(self):
+        t = trace()
+        t.record_request("GET", f"{API}/v1/x", None, "xhr",
+                         {"Authorization": "Bearer SEGRETISSIMO"})
+        report = t.to_markdown()
+        assert "authorization" in report
+        assert "SEGRETISSIMO" not in report
+
+    def test_scarta_gli_header_che_mette_il_browser(self):
+        from fantabot.lega.apitrace import _header_names
+
+        nomi = _header_names({
+            "Cookie": "c", "User-Agent": "u", "Accept": "*/*",
+            "sec-ch-ua": "x", "Referer": "r",
+            "X-Auth-Token": "t", "Content-Type": "application/json",
+        })
+        assert nomi == ["content-type", "x-auth-token"]
+
+    def test_senza_header_la_riga_non_compare(self):
+        t = trace()
+        t.record_request("GET", f"{API}/v1/x", None, "xhr", {"Cookie": "c"})
+        assert "header inviati" not in t.to_markdown()
+
+
+class TestChiaviDiStorage:
+    def test_elenca_solo_i_nomi(self):
+        t = trace()
+        t.record_request("GET", f"{API}/v1/x", None, "xhr")
+        t.storage_keys = {"local": ["auth-token", "utente"], "session": []}
+        report = t.to_markdown()
+        assert "localStorage: auth-token, utente" in report
+        assert "sessionStorage: (vuoto)" in report
+
+    def test_senza_storage_la_sezione_non_compare(self):
+        t = trace()
+        t.record_request("GET", f"{API}/v1/x", None, "xhr")
+        assert "Dove l'app tiene" not in t.to_markdown()

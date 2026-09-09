@@ -58,6 +58,8 @@ class ApiCall:
     status: int | None = None
     request_shape: Any | None = None
     response_shape: Any | None = None
+    #: Nomi degli header inviati: i valori possono essere token.
+    request_headers: list[str] = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -74,6 +76,8 @@ class ApiTrace:
         # una chiave che non avremmo classificato come sensibile.
         self._secrets = tuple(s for s in secrets if s and len(s) >= 4)
         self.calls: list[ApiCall] = []
+        #: Nomi delle chiavi di localStorage/sessionStorage, mai i valori.
+        self.storage_keys: dict[str, list[str]] = {}
         self._by_key: dict[str, ApiCall] = {}
 
     # -- raccolta -----------------------------------------------------------
@@ -88,7 +92,8 @@ class ApiTrace:
         return not any(host.startswith(p) for p in IGNORED_HOST_PREFIXES)
 
     def record_request(self, method: str, url: str, body: str | None,
-                       resource_type: str = "") -> ApiCall | None:
+                       resource_type: str = "",
+                       headers: dict[str, str] | None = None) -> ApiCall | None:
         """Registra una chiamata. Ritorna `None` se non ci interessa."""
         if not self.wants(url):
             return None
@@ -104,6 +109,7 @@ class ApiTrace:
             path=parsed.path,
             query_keys=sorted({p.split("=", 1)[0] for p in parsed.query.split("&") if p}),
             request_shape=self.shape(_parse_json(body)) if body else None,
+            request_headers=_header_names(headers or {}),
         )
 
         existing = self._by_key.get(call.key)
@@ -184,6 +190,8 @@ class ApiTrace:
             lines.append("")
             if call.query_keys:
                 lines.append(f"- parametri: {', '.join(call.query_keys)}")
+            if call.request_headers:
+                lines.append(f"- header inviati: {', '.join(call.request_headers)}")
             if call.request_shape is not None:
                 lines.append("- corpo della richiesta:")
                 lines.append("")
@@ -198,6 +206,13 @@ class ApiTrace:
                 lines.append("```")
             lines.append("")
 
+        if self.storage_keys:
+            lines.append("## Dove l'app tiene i suoi dati")
+            lines.append("")
+            for dove, chiavi in sorted(self.storage_keys.items()):
+                lines.append(f"- {dove}Storage: {', '.join(chiavi) or '(vuoto)'}")
+            lines.append("")
+
         # L'indice va in fondo di proposito: il log del job viene letto dalla
         # coda, quindi cio' che sta in cima e' la prima cosa a sparire.
         lines.append("## Indice delle chiamate")
@@ -206,6 +221,28 @@ class ApiTrace:
             stato = call.status if call.status is not None else "?"
             lines.append(f"- `{call.method} {call.host}{call.path}` -> {stato}")
         return "\n".join(lines)
+
+
+#: Header che il browser mette da solo: elencarli e' rumore.
+_BORING_HEADERS = frozenset({
+    "accept", "accept-encoding", "accept-language", "cache-control", "connection",
+    "content-length", "cookie", "host", "origin", "pragma", "referer",
+    "user-agent", "dnt", "te",
+})
+
+
+def _header_names(headers: dict[str, str]) -> list[str]:
+    """Solo i **nomi** degli header applicativi.
+
+    Serve a capire come l'app si autentica: se una chiamata risponde 401 senza
+    che noi la si replichi, e' quasi sempre un header che il browser non mette
+    da solo. I valori restano fuori: sono esattamente il token che cerchiamo di
+    non far uscire.
+    """
+    return sorted(
+        name.lower() for name in headers
+        if name.lower() not in _BORING_HEADERS and not name.lower().startswith("sec-")
+    )
 
 
 def _parse_json(body: str | None) -> Any:
