@@ -30,10 +30,23 @@ class TestConfig:
         with pytest.raises(ConfigError):
             Config.load("/percorso/che/non/esiste.yaml")
 
-    def test_dry_run_default_attivo(self, real_config, monkeypatch):
-        """Il default deve essere prudente: nessun invio reale."""
+    def test_la_config_reale_schiera_davvero(self, real_config, monkeypatch):
+        """Con `dry_run: true` i run automatici non schiererebbero mai.
+
+        E' stato true finche' l'invio non era provato. Ora l'API e' stata
+        verificata su un salvataggio reale, e lasciarlo true significherebbe
+        calcolare la formazione ogni venerdi' senza mandarla: il contrario del
+        mestiere di questo programma. Per una prova senza rischi restano il
+        flag della action e `--dry-run`.
+        """
         monkeypatch.delenv("DRY_RUN", raising=False)
-        assert real_config.dry_run is True
+        assert real_config.dry_run is False
+
+    def test_il_dry_run_resta_disattivabile_dal_singolo_run(self, config_factory,
+                                                            monkeypatch):
+        """La prudenza si sceglie run per run, non piu' nel file."""
+        monkeypatch.delenv("DRY_RUN", raising=False)
+        assert config_factory({"run.dry_run": True}).dry_run is True
 
     @pytest.mark.parametrize("value", ["false", "FALSE", "0", "no"])
     def test_env_var_disattiva_il_dry_run(self, real_config, monkeypatch, value):
