@@ -196,3 +196,42 @@ class TestUrlPagineLega:
         for name, url in selectors["pages"].items():
             trovati = set(re.findall(r"\{(\w+)\}", url))
             assert trovati <= noti, f"{name}: segnaposto sconosciuti {trovati - noti}"
+
+
+class TestRisoluzioneSquadreRosa:
+    """Il passaggio che collega la rosa della lega alle fonti."""
+
+    def _rosa(self):
+        from fantabot.models import Role, RosterPlayer
+
+        return [
+            RosterPlayer(name="Cambiaso", team="JUV", role=Role.D, order=0),
+            RosterPlayer(name="Dodo", team="FIO", role=Role.D, order=1),
+            RosterPlayer(name="Casadei", team="", role=Role.C, order=2),
+            RosterPlayer(name="Tizio", team="XYZ", role=Role.A, order=3),
+        ]
+
+    def test_le_sigle_diventano_nomi_completi(self):
+        from fantabot.names import AliasMap
+        from fantabot.runner import _resolve_roster_teams
+
+        risolti = _resolve_roster_teams(
+            self._rosa(), {"Juventus", "Fiorentina", "Como"}, AliasMap()
+        )
+        assert [p.team for p in risolti] == ["Juventus", "Fiorentina", "", "XYZ"]
+
+    def test_senza_squadre_di_giornata_non_tocca_nulla(self):
+        from fantabot.names import AliasMap
+        from fantabot.runner import _resolve_roster_teams
+
+        rosa = self._rosa()
+        assert _resolve_roster_teams(rosa, set(), AliasMap()) == rosa
+
+    def test_non_altera_gli_altri_campi(self):
+        from fantabot.names import AliasMap
+        from fantabot.runner import _resolve_roster_teams
+
+        risolti = _resolve_roster_teams(self._rosa(), {"Juventus"}, AliasMap())
+        assert risolti[0].name == "Cambiaso"
+        assert risolti[0].order == 0
+        assert risolti[0].role.value == "D"

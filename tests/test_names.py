@@ -104,3 +104,53 @@ class TestRosaSenzaSquadra:
         matcher = PlayerMatcher([("Cambiaso", "Juventus"), ("McTominay", "")])
         assert matcher.match("Cambiaso", "Juventus") == ("Cambiaso", "Juventus")
         assert matcher.match("McTominay", "Napoli") == ("McTominay", "")
+
+
+class TestSigleSquadra:
+    """La lega scrive la squadra come sigla, fonti e calendario per esteso.
+
+    Senza convertirle nessun giocatore combacia con le probabili e ognuno
+    prende il malus di "squadra non in campo": nel run reale tutti i titolari
+    finivano a punteggio negativo e stato "sconosciuto".
+    """
+
+    NOTE = ["Juventus", "Fiorentina", "Genoa", "Milan", "Atalanta", "Sassuolo",
+            "Udinese", "Inter", "Napoli", "Como"]
+
+    def test_risolve_le_sigle_viste_nel_run_reale(self):
+        from fantabot.names import resolve_team
+
+        for sigla, atteso in [
+            ("JUV", "Juventus"), ("FIO", "Fiorentina"), ("GEN", "Genoa"),
+            ("MIL", "Milan"), ("ATA", "Atalanta"), ("SAS", "Sassuolo"),
+            ("UDI", "Udinese"),
+        ]:
+            assert resolve_team(sigla, self.NOTE) == atteso
+
+    def test_un_nome_gia_completo_resta_invariato(self):
+        from fantabot.names import resolve_team
+
+        assert resolve_team("Juventus", self.NOTE) == "Juventus"
+
+    def test_una_sigla_sconosciuta_resta_invariata(self):
+        """Puo' essere una squadra che riposa: non va inventata."""
+        from fantabot.names import resolve_team
+
+        assert resolve_team("XYZ", self.NOTE) == "XYZ"
+
+    def test_squadra_vuota(self):
+        from fantabot.names import resolve_team
+
+        assert resolve_team("", self.NOTE) == ""
+
+    def test_un_prefisso_ambiguo_non_viene_indovinato(self):
+        """Meglio non risolvere che attribuire il giocatore alla squadra sbagliata."""
+        from fantabot.names import resolve_team
+
+        assert resolve_team("CO", ["Como", "Cosenza"]) == "CO"
+
+    def test_usa_gli_alias_quando_ci_sono(self):
+        from fantabot.names import AliasMap, resolve_team
+
+        aliases = AliasMap(teams={"internazionale": "inter", "inter": "inter"})
+        assert resolve_team("Internazionale", ["Inter"], aliases) == "Inter"
