@@ -75,11 +75,12 @@ class RunAborted(RuntimeError):
 
 class Runner:
     def __init__(self, cfg: Config, secrets: Secrets, *, force: bool = False,
-                 headless: bool = True) -> None:
+                 headless: bool = True, capture_api: bool = False) -> None:
         self.cfg = cfg
         self.secrets = secrets
         self.force = force
         self.headless = headless
+        self.capture_api = capture_api
         self.notifier = TelegramNotifier(
             token=secrets.telegram_token,
             chat_id=secrets.telegram_chat_id,
@@ -140,6 +141,7 @@ class Runner:
             headless=self.headless,
             artifacts_dir=out_dir / "lega",
             diagnostics_dir=out_dir,
+            capture_api=self.capture_api,
             timezone=str(self.cfg.get("deadline.timezone", "Europe/Rome")),
         ) as lega:
             lega.login()
@@ -188,9 +190,14 @@ class Runner:
             result.lineup = lineup
             log.info("formazione scelta: %s", lineup.module)
 
-            detail = lega.submit_lineup(lineup, dry_run=self.cfg.dry_run)
-            result.submit_detail = detail
-            result.submitted = not self.cfg.dry_run
+            try:
+                detail = lega.submit_lineup(lineup, dry_run=self.cfg.dry_run)
+                result.submit_detail = detail
+                result.submitted = not self.cfg.dry_run
+            finally:
+                # Anche se il submit fallisce il registro va salvato: e'
+                # proprio la chiamata fallita quella che interessa vedere.
+                lega.save_api_trace()
 
     def _resolve_matchday(self, lega: LeagueClient) -> Matchday:
         with client_from_config(self.cfg, cache_dir=Path(".cache-http")) as client:

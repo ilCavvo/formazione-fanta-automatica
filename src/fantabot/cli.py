@@ -49,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="ignora i controlli sulla deadline")
     parser.add_argument("--headful", action="store_true",
                         help="mostra il browser (debug locale)")
+    parser.add_argument("--capture-api", action="store_true",
+                        help="registra le chiamate JSON dell'app della lega "
+                             "(forma dei corpi, mai i valori sensibili)")
 
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="run completo")
@@ -92,7 +95,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_run(cfg: Config, secrets: Secrets, args) -> int:
-    runner = Runner(cfg, secrets, force=args.force, headless=not args.headful)
+    runner = Runner(cfg, secrets, force=args.force, headless=not args.headful,
+                    capture_api=args.capture_api)
     try:
         result = runner.run()
     except Exception as exc:  # noqa: BLE001 - gia' notificato dal runner

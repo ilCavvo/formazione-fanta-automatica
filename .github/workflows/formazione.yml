@@ -37,6 +37,10 @@ on:
         description: "Ignora i controlli sulla deadline"
         type: boolean
         default: false
+      capture_api:
+        description: "Registra le chiamate JSON della lega (indagine)"
+        type: boolean
+        default: false
       log_level:
         description: "Livello di log"
         type: choice
@@ -97,10 +101,14 @@ jobs:
           # `discover` mappa le pagine della lega e scrive out/discovery.md:
           # e' il comando da lanciare quando la lettura della rosa fallisce.
           COMMAND: ${{ inputs.command || 'run' }}
+          CAPTURE_API: ${{ github.event_name == 'workflow_dispatch' && inputs.capture_api || false }}
         run: |
           args=(--log-level "$LOG_LEVEL")
           if [ "$FORCE" = "true" ]; then
             args+=(--force)
+          fi
+          if [ "$CAPTURE_API" = "true" ]; then
+            args+=(--capture-api)
           fi
           echo "COMMAND=$COMMAND  DRY_RUN=${DRY_RUN:-<da config.yaml>}  FORCE=$FORCE"
           fantabot "${args[@]}" "$COMMAND"

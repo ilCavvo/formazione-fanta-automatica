@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+from fantabot.lega.apitrace import ApiTrace
 from fantabot.lega.discovery import PageSummary, summarise, to_markdown
 from fantabot.models import Lineup, Role, RosterPlayer
 
@@ -132,6 +133,7 @@ class LeagueClient:
         timeout_ms: int = 30_000,
         artifacts_dir: Path | None = None,
         diagnostics_dir: Path | None = None,
+        capture_api: bool = False,
         timezone: str = "Europe/Rome",
     ) -> None:
         self.slug = slug
@@ -147,6 +149,8 @@ class LeagueClient:
         # che e' sicuro da pubblicare: e' quello che serve per capire i guasti
         # senza dover chiedere di rilanciare a mano un comando diverso.
         self.diagnostics_dir = diagnostics_dir
+        #: Registro delle chiamate JSON, per riscrivere il flusso senza browser.
+        self.trace = ApiTrace(secrets=(username, password)) if capture_api else None
         self.tz = ZoneInfo(timezone)
 
         self._playwright = None
@@ -175,6 +179,58 @@ class LeagueClient:
         )
         self._context.set_default_timeout(self.timeout_ms)
         self._page = self._context.new_page()
+        if self.trace is not None:
+            self._attach_trace()
+
+    def _attach_trace(self) -> None:
+        """Ascolta le chiamate di rete dell'app.
+
+        Gli ascoltatori non devono mai far fallire il run: qualunque errore
+        nella registrazione viene ingoiato, perche' e' uno strumento di
+        indagine, non parte del lavoro.
+        """
+        trace = self.trace
+        if trace is None or self._context is None:
+            return
+
+        def on_request(request) -> None:
+            try:
+                body = None
+                if request.method.upper() in {"POST", "PUT", "PATCH"}:
+                    body = request.post_data
+                trace.record_request(request.method, request.url, body,
+                                     request.resource_type)
+            except Exception:  # noqa: BLE001
+                log.debug("richiesta non registrata", exc_info=True)
+
+        def on_response(response) -> None:
+            try:
+                if not trace.wants(response.url):
+                    return
+                body = None
+                content_type = (response.header_value("content-type") or "").lower()
+                if "json" in content_type:
+                    body = response.text()
+                trace.record_response(response.url, response.request.method,
+                                      response.status, body)
+            except Exception:  # noqa: BLE001
+                log.debug("risposta non registrata", exc_info=True)
+
+        self._context.on("request", on_request)
+        self._context.on("response", on_response)
+        log.info("registrazione delle chiamate di rete attiva")
+
+    def save_api_trace(self) -> Path | None:
+        """Scrive e logga il registro delle chiamate, se attivo."""
+        if self.trace is None or self.diagnostics_dir is None:
+            return None
+        text = self.trace.to_markdown()
+        self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        path = self.diagnostics_dir / "api-trace.md"
+        path.write_text(text, encoding="utf-8")
+        log.info("registro chiamate in %s\n%s\n%s\n%s",
+                 path, "=" * 60, text, "=" * 60)
+        return path
 
     def close(self) -> None:
         for closer in (self._context, self._browser):
