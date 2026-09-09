@@ -476,6 +476,7 @@ class LeagueClient:
         rows = self._query_all(cfg["row"])
         if not rows:
             self.save_artifacts("rosa")
+            self._save_diagnostics("rosa")
             raise LeagueError(
                 f"nessuna riga rosa trovata su {url} "
                 f"(pagina finale: {self.page.url}). Lancia `fantabot discover`: "
@@ -507,6 +508,7 @@ class LeagueClient:
 
         if not roster:
             self.save_artifacts("rosa")
+            self._save_diagnostics("rosa")
             raise LeagueError(
                 f"rosa letta ma vuota su {url}: ho trovato {len(rows)} righe ma i "
                 "selettori nome/ruolo non combaciano. Lancia `fantabot discover` "
@@ -657,7 +659,13 @@ class LeagueClient:
         safe = re.sub(r"[^a-z0-9_-]+", "-", label.lower())
         path = self.diagnostics_dir / f"diagnostica-{safe}.md"
         path.write_text(text, encoding="utf-8")
-        log.info("diagnostica scritta in %s", path)
+
+        # Anche a video, non solo su file: il file finisce in un artifact, che
+        # per leggerlo va scaricato. Nel log del job invece si legge subito, ed
+        # e' li' che si guarda quando un run fallisce. Il contenuto e' lo stesso
+        # riassunto sicuro: nessun HTML grezzo, nessun valore di cookie.
+        log.info("diagnostica scritta in %s\n%s\n%s\n%s",
+                 path, "=" * 60, text, "=" * 60)
         return path
 
     def save_artifacts(self, label: str) -> None:

@@ -229,3 +229,37 @@ class TestAtteseDiNavigazione:
 
         # L'assestamento e' un'attesa accessoria: deve restare la piu' corta.
         assert SETTLE_TIMEOUT_MS < LOGIN_WAIT_MS < NAV_TIMEOUT_MS
+
+
+class TestDiagnosticaLeggibile:
+    """La diagnostica deve arrivare dove la si guarda: nel log del job.
+
+    Scriverla solo su file la rende inutile nella pratica: quel file vive in
+    un artifact, che per leggerlo va scaricato.
+    """
+
+    def test_la_diagnostica_viene_anche_loggata(self):
+        import inspect
+
+        from fantabot.lega.client import LeagueClient
+
+        sorgente = inspect.getsource(LeagueClient._save_diagnostics)
+        assert "log.info" in sorgente
+        assert "text" in sorgente.split("log.info", 1)[1][:200]
+
+    def test_la_rosa_illeggibile_produce_la_diagnostica(self):
+        import inspect
+
+        from fantabot.lega.client import LeagueClient
+
+        sorgente = inspect.getsource(LeagueClient.read_roster)
+        # Entrambi i rami di fallimento: nessuna riga, e righe senza dati utili.
+        assert sorgente.count("_save_diagnostics") == 2
+
+    def test_discover_stampa_il_report(self):
+        import inspect
+
+        from fantabot.cli import _cmd_discover
+
+        sorgente = inspect.getsource(_cmd_discover)
+        assert "report.read_text" in sorgente

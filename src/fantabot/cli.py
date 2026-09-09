@@ -222,6 +222,9 @@ def _cmd_discover(cfg: Config, secrets: Secrets, args) -> int:
         encoding="utf-8",
     )
 
+    # Stampato per intero, non solo salvato: il file vive in un artifact che
+    # va scaricato, mentre il log del job si legge subito.
+    print(report.read_text(encoding="utf-8"))
     print(f"Report scritto in {report}")
     if login_error:
         print(f"ATTENZIONE: il login e' fallito ({login_error})")
