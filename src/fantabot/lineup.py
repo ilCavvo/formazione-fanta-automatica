@@ -70,8 +70,35 @@ class LineupSettings:
 
     w_probabilita: float = 25.0
     w_consenso: float = 15.0
-    w_fantamedia: float = 8.0
     w_ordine_rosa: float = 0.5
+
+    # -- chi si affronta ---------------------------------------------------
+    #: Quanto pesa l'avversario, per ruolo. Il portiere e' il piu' esposto:
+    #: subisce l'attacco avversario per intero e non ha bonus con cui rifarsi.
+    w_avversario: dict[str, float] = field(
+        default_factory=lambda: {"P": 10.0, "D": 5.0, "C": 3.0, "A": 4.0}
+    )
+    #: Oltre questo scarto dalla media di campionato non si guarda: a inizio
+    #: stagione tre partite bastano a produrre numeri che non significano nulla.
+    max_scarto_avversario: float = 1.5
+    w_forma_squadra: float = 4.0
+    w_forma_avversario: float = 3.0
+
+    # -- come sta andando --------------------------------------------------
+    #: Media voto, misurata rispetto alla sufficienza.
+    w_media_voto: float = 12.0
+    #: Bonus e malus medi a partita (fantamedia meno media voto).
+    w_bonus: float = 14.0
+    max_scarto_bonus: float = 2.5
+    #: Sotto questo numero di partite le medie sono rumore: non si usano.
+    min_partite: int = 2
+    #: Tetto complessivo dei contributi statistici, in valore assoluto.
+    #: Zero = nessun tetto, ed e' il default: un giocatore forte che gioca
+    #: sempre puo' battere un titolare scarso anche quando le probabili lo
+    #: danno in panchina. Serve che sia possibile, non che sia frequente.
+    #: Chi non e' disponibile (infortunato, squalificato) resta fuori a
+    #: prescindere: e' escluso prima del punteggio, non con un numero basso.
+    max_totale_statistiche: float = 0.0
 
     pen_squadra_ferma: float = 500.0
     pen_dubbio: float = 12.0
@@ -81,7 +108,7 @@ class LineupSettings:
     module_preferences: dict[str, float] = field(default_factory=dict)
 
     allow_incomplete: bool = True
-    bench_strategy: str = "per_ruolo_poi_punteggio"
+    bench_strategy: str = "punteggio_portieri_in_fondo"
     tiebreakers: tuple[str, ...] = ("probabilita_media", "ordine_rosa")
 
     slot_limits: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -109,8 +136,25 @@ class LineupSettings:
             score_out=float(cfg.get("lineup.scores.out", -1000.0)),
             w_probabilita=float(cfg.get("lineup.weights.probabilita", 25.0)),
             w_consenso=float(cfg.get("lineup.weights.consenso", 15.0)),
-            w_fantamedia=float(cfg.get("lineup.weights.fantamedia", 8.0)),
             w_ordine_rosa=float(cfg.get("lineup.weights.ordine_rosa", 0.5)),
+            w_avversario={
+                ruolo: float(
+                    (cfg.get("lineup.weights.avversario", {}) or {}).get(ruolo, default)
+                )
+                for ruolo, default in (("P", 10.0), ("D", 5.0), ("C", 3.0), ("A", 4.0))
+            },
+            max_scarto_avversario=float(
+                cfg.get("lineup.weights.max_scarto_avversario", 1.5)
+            ),
+            w_forma_squadra=float(cfg.get("lineup.weights.forma_squadra", 4.0)),
+            w_forma_avversario=float(cfg.get("lineup.weights.forma_avversario", 3.0)),
+            w_media_voto=float(cfg.get("lineup.weights.media_voto", 12.0)),
+            w_bonus=float(cfg.get("lineup.weights.bonus", 14.0)),
+            max_scarto_bonus=float(cfg.get("lineup.weights.max_scarto_bonus", 2.5)),
+            min_partite=int(cfg.get("lineup.weights.min_partite", 2)),
+            max_totale_statistiche=float(
+                cfg.get("lineup.weights.max_totale_statistiche", 0.0)
+            ),
             pen_squadra_ferma=float(cfg.get("lineup.penalties.squadra_non_in_campo", 500.0)),
             pen_dubbio=float(cfg.get("lineup.penalties.per_dubbio_schierato", 12.0)),
             bonus_difesa_4=float(
@@ -121,7 +165,7 @@ class LineupSettings:
             ),
             module_preferences=dict(cfg.get("lineup.module_bonus.preferenze", {}) or {}),
             allow_incomplete=bool(cfg.get("lineup.allow_incomplete_lineup", True)),
-            bench_strategy=str(cfg.get("lineup.bench_strategy", "per_ruolo_poi_punteggio")),
+            bench_strategy=str(cfg.get("lineup.bench_strategy", "punteggio_portieri_in_fondo")),
             tiebreakers=tuple(cfg.get("aggregation.tiebreakers", []) or ()),
             slot_limits={
                 "D": limits("difensori", (3, 5)),
@@ -144,7 +188,115 @@ _BASE_BY_STATUS = {
 }
 
 
-def score_player(verdict: PlayerVerdict, settings: LineupSettings) -> ScoredPlayer:
+def _clamp(value: float, limit: float) -> float:
+    return max(-limit, min(limit, value))
+
+
+def _capped(terms: dict[str, float], limit: float) -> dict[str, float]:
+    """Riduce in proporzione i contributi statistici se sforano il tetto.
+
+    Si riduce invece di tagliare cosi' il dettaglio resta leggibile: si vede
+    ancora quanto ha pesato l'avversario rispetto ai bonus, in scala.
+    """
+    if not terms or limit <= 0:
+        return terms
+    totale = sum(terms.values())
+    if abs(totale) <= limit:
+        return terms
+    fattore = limit / abs(totale)
+    return {nome: valore * fattore for nome, valore in terms.items()}
+
+
+def _opponent_terms(verdict: PlayerVerdict, settings: LineupSettings,
+                    guide) -> dict[str, float]:
+    """Quanto pesa, per questo giocatore, la squadra che affronta.
+
+    Il metro cambia con il ruolo, perche' cambia cosa fa male:
+
+    - portiere e difensori subiscono l'**attacco** avversario: piu' gol fa
+      l'avversario, meno vale schierarli. E' la regola chiesta, e il portiere
+      la sente per intero perche' non ha bonus con cui compensare;
+    - centrocampisti e attaccanti trovano davanti la **difesa** avversaria: una
+      difesa che incassa poco vale un punteggio minore, una che incassa tanto
+      apre al bonus.
+
+    Tutto e' misurato come scarto dalla media del campionato, cosi' un
+    avversario nella norma non sposta niente invece di spostare tutti.
+    """
+    peso = settings.w_avversario.get(str(verdict.player.role), 0.0)
+    if guide is None or not peso:
+        return {}
+
+    squadra = verdict.player.team
+    avversario = guide.opponent_of(squadra)
+    if avversario is None or avversario.played < settings.min_partite:
+        return {}
+
+    terms: dict[str, float] = {}
+    book = guide.book
+
+    if verdict.player.role in (Role.P, Role.D):
+        forza, media = avversario.attack, book.average_attack
+        verso = -1.0
+    else:
+        forza, media = avversario.defence, book.average_defence
+        verso = +1.0
+
+    if forza is not None and media is not None:
+        scarto = _clamp(forza - media, settings.max_scarto_avversario)
+        terms["avversario"] = verso * scarto * peso
+
+    if settings.w_forma_avversario and book.average_form is not None:
+        punti = avversario.form_points
+        if punti is not None:
+            scarto = _clamp(punti - book.average_form, settings.max_scarto_avversario)
+            # Anche la forma dell'avversario segue il dosaggio per ruolo: se
+            # cosi' non fosse, peserebbe uguale su tutti e annullerebbe la
+            # distinzione fra il portiere e gli altri.
+            massimo = max(settings.w_avversario.values() or [1.0]) or 1.0
+            terms["forma_avversario"] = (
+                -scarto * settings.w_forma_avversario * (peso / massimo)
+            )
+
+    if settings.w_forma_squadra and book.average_form is not None:
+        mia = guide.team_of(squadra)
+        if mia is not None and mia.played >= settings.min_partite:
+            punti = mia.form_points
+            if punti is not None:
+                scarto = _clamp(punti - book.average_form, settings.max_scarto_avversario)
+                terms["forma_squadra"] = scarto * settings.w_forma_squadra
+
+    return terms
+
+
+def _form_terms(verdict: PlayerVerdict, settings: LineupSettings,
+                guide) -> dict[str, float]:
+    """Come sta andando il giocatore: i voti che prende e i bonus che porta.
+
+    Sono due cose distinte e vanno pesate separatamente. La fantamedia non ha
+    un peso suo proprio perche' **e' la loro somma**: darle un peso in piu'
+    significherebbe contare due volte le stesse partite.
+    """
+    if guide is None:
+        return {}
+    stat = guide.stats_for(verdict.player.name)
+    if stat is None or stat.played < settings.min_partite:
+        return {}
+
+    terms: dict[str, float] = {}
+    if stat.media_voto is not None and settings.w_media_voto:
+        # Misurata sulla sufficienza: il 6 e' il punto neutro del voto.
+        terms["media_voto"] = (stat.media_voto - 6.0) * settings.w_media_voto
+
+    bonus = stat.bonus_per_match
+    if bonus is not None and settings.w_bonus:
+        terms["bonus"] = _clamp(bonus, settings.max_scarto_bonus) * settings.w_bonus
+
+    return terms
+
+
+def score_player(verdict: PlayerVerdict, settings: LineupSettings,
+                 guide=None) -> ScoredPlayer:
     """Punteggio di un giocatore, con il dettaglio di come si compone."""
     breakdown: dict[str, float] = {}
 
@@ -156,8 +308,9 @@ def score_player(verdict: PlayerVerdict, settings: LineupSettings) -> ScoredPlay
 
     breakdown["consenso"] = verdict.consensus * settings.w_consenso
 
-    if verdict.player.fantamedia is not None:
-        breakdown["fantamedia"] = (verdict.player.fantamedia / 10.0) * settings.w_fantamedia
+    statistiche = {**_form_terms(verdict, settings, guide),
+                   **_opponent_terms(verdict, settings, guide)}
+    breakdown.update(_capped(statistiche, settings.max_totale_statistiche))
 
     # Piu' in alto in rosa = spinta leggermente maggiore, a parita' di tutto.
     breakdown["ordine_rosa"] = -verdict.player.order * settings.w_ordine_rosa
@@ -176,9 +329,14 @@ def score_player(verdict: PlayerVerdict, settings: LineupSettings) -> ScoredPlay
 # --------------------------------------------------------------------------
 
 
-def build_lineup(verdicts: list[PlayerVerdict], settings: LineupSettings) -> Lineup:
-    """Sceglie modulo e undici titolari, e ordina la panchina."""
-    scored = [score_player(v, settings) for v in verdicts]
+def build_lineup(verdicts: list[PlayerVerdict], settings: LineupSettings,
+                 guide=None) -> Lineup:
+    """Sceglie modulo e undici titolari, e ordina la panchina.
+
+    `guide` e' la `FormGuide` con statistiche e avversari di giornata: se manca
+    (fonte irraggiungibile) il calcolo prosegue con le sole probabili.
+    """
+    scored = [score_player(v, settings, guide) for v in verdicts]
 
     # Gli indisponibili non entrano mai fra i titolari: sono esclusi qui, non
     # tramite un punteggio molto negativo, cosi' il conteggio dei titolari
@@ -241,7 +399,7 @@ def build_lineup(verdicts: list[PlayerVerdict], settings: LineupSettings) -> Lin
         module_scores={m.name: s for s, m, _, _ in candidates},
         warnings=warnings,
     )
-    lineup.decisions = _decisions(lineup, excluded, by_role, settings)
+    lineup.decisions = _decisions(lineup, excluded, by_role, settings, guide)
     return lineup
 
 
@@ -291,18 +449,26 @@ def _build_bench(
 ) -> list[ScoredPlayer]:
     """Panchina in ordine di subentro.
 
-    Con `per_ruolo_poi_punteggio` la panchina e' raggruppata per ruolo (P, D, C,
-    A) e ordinata per punteggio dentro ogni gruppo: e' l'ordine che serve al
-    subentro automatico, che sostituisce un titolare con una riserva del suo
-    stesso ruolo.
+    Tre ordinamenti, scelti da `lineup.bench_strategy`:
+
+    - `punteggio_portieri_in_fondo` (default): dal punteggio piu' alto al piu'
+      basso, con i portieri sempre in coda. E' l'ordine giusto perche' il
+      subentro pesca il primo della lista utile: davanti va chi rende di piu',
+      mentre un portiere di riserva serve solo nel caso raro in cui il titolare
+      non giochi, e messo in alto ruberebbe il posto a chi puo' entrare
+      davvero;
+    - `solo_punteggio`: punteggio puro, portieri compresi;
+    - `per_ruolo_poi_punteggio`: raggruppata per ruolo P, D, C, A.
     """
     chosen = {id(p) for p in starters}
     rest = [p for p in available if id(p) not in chosen]
 
     if settings.bench_strategy == "solo_punteggio":
         rest.sort(key=lambda p: p.score, reverse=True)
-    else:
+    elif settings.bench_strategy == "per_ruolo_poi_punteggio":
         rest = _sort_by_role(rest)
+    else:
+        rest.sort(key=lambda p: (p.role is Role.P, -p.score))
 
     return rest[: settings.bench_size]
 
@@ -312,6 +478,7 @@ def _decisions(
     excluded: list[ScoredPlayer],
     by_role: dict[Role, list[ScoredPlayer]],
     settings: LineupSettings,
+    guide=None,
 ) -> list[str]:
     """Righe leggibili che spiegano le scelte, per il messaggio Telegram."""
     lines: list[str] = []
@@ -328,6 +495,8 @@ def _decisions(
         lines.append(
             f"Modificatore difesa attivo: schierati {difensori} difensori"
         )
+
+    lines.extend(_opponent_lines(lineup, guide))
 
     for player in lineup.starters:
         if player.verdict.status is Status.DOUBT:
@@ -358,6 +527,38 @@ def _decisions(
                 "non risulta in campo in questa giornata"
             )
 
+    return lines
+
+
+def _opponent_lines(lineup: Lineup, guide) -> list[str]:
+    """Spiega l'incontro dove ha spostato davvero il punteggio.
+
+    Il portiere per primo e sempre, perche' e' il ruolo dove la scelta si gioca
+    quasi tutta sull'avversario; degli altri si nomina solo chi ha ricevuto una
+    spinta sensibile, altrimenti il messaggio diventa un elenco che nessuno
+    legge.
+    """
+    if guide is None:
+        return []
+
+    lines: list[str] = []
+    for player in lineup.starters:
+        peso = player.breakdown.get("avversario")
+        if peso is None:
+            continue
+        avversario = guide.opponent_name(player.player.team)
+        if not avversario:
+            continue
+        stats = guide.opponent_of(player.player.team)
+        if player.role is Role.P and stats is not None and stats.attack is not None:
+            lines.append(
+                f"{player.player.name} contro {avversario}, che segna "
+                f"{stats.attack:.1f} gol a partita ({peso:+.0f} punti)"
+            )
+        elif abs(peso) >= 3.0:
+            lines.append(
+                f"{player.player.name} contro {avversario} ({peso:+.0f} punti)"
+            )
     return lines
 
 
