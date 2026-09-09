@@ -48,6 +48,14 @@ league:
   # "classic" oppure "mantra". Attualmente e' implementato "classic".
   mode: "classic"
 
+  # Invia la formazione tramite l'API della lega invece che cliccando nella
+  # pagina. Piu' veloce e soprattutto piu' corretto: il modulo e gli undici
+  # vengono scritti esplicitamente e riletti dalla risposta per verificarli,
+  # mentre cliccando sui nomi l'app ricomponeva una formazione sua.
+  # Se l'API risponde in modo inatteso si ripiega da soli sul browser, quindi
+  # metterlo a false serve solo per escluderla del tutto.
+  use_api: true
+
   # Se true, all'avvio l'agente legge la pagina regolamento della lega e prova a
   # dedurre moduli ammessi e modificatori, sovrascrivendo i valori qui sotto.
   # Se la lettura fallisce, si usano i valori di questo file (nessun blocco).

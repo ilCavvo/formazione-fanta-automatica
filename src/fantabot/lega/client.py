@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+from fantabot.lega.api import ApiError, LeagueApi
 from fantabot.lega.apitrace import ApiTrace
 from fantabot.lega.discovery import PageSummary, summarise, to_markdown
 from fantabot.models import Lineup, Role, RosterPlayer
@@ -51,6 +52,9 @@ SETTLE_TIMEOUT_MS = 8_000
 
 #: Quanto aspettare che il login produca un effetto (XHR + cambio rotta).
 LOGIN_WAIT_MS = 15_000
+
+#: Id competizione dentro l'URL della pagina formazione.
+_COMPETITION_IN_URL = re.compile(r"/view/competition/(\d+)")
 
 #: Attesa massima per il bottone del banner consensi.
 CONSENT_TIMEOUT_MS = 5_000
@@ -134,6 +138,7 @@ class LeagueClient:
         artifacts_dir: Path | None = None,
         diagnostics_dir: Path | None = None,
         capture_api: bool = False,
+        use_api: bool = True,
         timezone: str = "Europe/Rome",
     ) -> None:
         self.slug = slug
@@ -151,6 +156,8 @@ class LeagueClient:
         self.diagnostics_dir = diagnostics_dir
         #: Registro delle chiamate JSON, per riscrivere il flusso senza browser.
         self.trace = ApiTrace(secrets=(username, password)) if capture_api else None
+        #: Se true si prova prima l'API, con il browser come ripiego.
+        self.use_api = use_api
         self.tz = ZoneInfo(timezone)
 
         self._playwright = None
@@ -650,6 +657,50 @@ class LeagueClient:
         """
         url = self._page_url("formazione")
         self._goto(url)
+
+        if self.use_api:
+            try:
+                return self._submit_via_api(lineup, dry_run)
+            except ApiError as exc:
+                # Il ripiego esiste proprio per questo: l'API e' privata e non
+                # documentata, quindi un cambiamento non deve lasciarci fermi.
+                log.warning("invio via API non riuscito (%s): ripiego sul browser", exc)
+
+        return self._submit_via_browser(lineup, dry_run)
+
+    def _submit_via_api(self, lineup: Lineup, dry_run: bool) -> str:
+        """Legge la formazione attuale, ne sostituisce l'undici e la riscrive."""
+        idcomp = self._competition_id()
+        if not idcomp:
+            raise ApiError(
+                f"id competizione non ricavabile dall'URL {self.page.url}"
+            )
+
+        starters = _player_ids(lineup.starters)
+        if len(starters) != len(lineup.starters):
+            senza = [p.player.name for p in lineup.starters if not p.player.player_id]
+            raise ApiError(f"titolari senza identificativo: {', '.join(senza)}")
+        bench = _player_ids(lineup.bench)
+
+        api = LeagueApi(self._context.request)
+        current = api.read_lineup(idcomp)
+
+        if dry_run:
+            return (
+                f"DRY_RUN: formazione {lineup.module} pronta per l'API "
+                f"(competizione {idcomp}, {len(starters)} titolari e "
+                f"{len(bench)} in panchina), salvataggio NON eseguito"
+            )
+
+        return api.save_lineup(current, starters, bench, lineup.module).describe()
+
+    def _competition_id(self) -> str | None:
+        """Id competizione, dall'URL su cui il sito ci ha portati."""
+        match = _COMPETITION_IN_URL.search(self.page.url)
+        return match.group(1) if match else None
+
+    def _submit_via_browser(self, lineup: Lineup, dry_run: bool) -> str:
+        """Ripiego: schiera cliccando, come si faceva prima dell'API."""
         cfg = self.selectors["formazione"]
 
         self._select_module(cfg, lineup.module)
@@ -982,6 +1033,16 @@ def _first_value(row, candidates: list[str]) -> str:
 #: L'avatar del giocatore e' servito come `<id>.png`: e' l'unico posto della
 #: pagina dove l'identificativo numerico compare, ed e' quello che l'API usa.
 _ID_IN_FILENAME = re.compile(r"(\d{2,})\.\w+$")
+
+
+def _player_ids(players) -> list[int]:
+    """Identificativi numerici, saltando chi non ce l'ha."""
+    out: list[int] = []
+    for scored in players:
+        raw = scored.player.player_id
+        if raw and str(raw).isdigit():
+            out.append(int(raw))
+    return out
 
 
 def _player_id(row, cfg: dict[str, Any]) -> str | None:

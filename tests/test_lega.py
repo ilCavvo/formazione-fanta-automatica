@@ -406,7 +406,9 @@ class TestConfermaSalvataggio:
 
         from fantabot.lega.client import LeagueClient
 
-        sorgente = inspect.getsource(LeagueClient.submit_lineup)
+        # La conferma a schermo riguarda il ripiego sul browser: con l'API
+        # la verifica si fa sui dati della risposta.
+        sorgente = inspect.getsource(LeagueClient._submit_via_browser)
         assert "_save_diagnostics" in sorgente
 
     def test_il_messaggio_dice_che_potrebbe_essere_salvata(self):
@@ -415,7 +417,7 @@ class TestConfermaSalvataggio:
 
         from fantabot.lega.client import LeagueClient
 
-        sorgente = inspect.getsource(LeagueClient.submit_lineup)
+        sorgente = inspect.getsource(LeagueClient._submit_via_browser)
         assert "potrebbe essere comunque stata salvata" in sorgente
 
 

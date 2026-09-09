@@ -251,6 +251,33 @@ Salva in `out/inspect/` l'HTML **grezzo** e uno screenshot a tutta pagina.
 Molto piu' dettagliato, ma e' materiale da pagina loggata: il workflow lo
 esclude apposta dagli artifact, quindi ha senso solo sulla tua macchina.
 
+### Come viene inviata la formazione
+
+Non cliccando nella pagina, ma tramite l'**API della lega** — gli stessi
+endpoint che usa l'app ufficiale, ricavati registrandone le chiamate:
+
+```
+GET  /gaming/v1/teamLineup/visualizza/A/{idcomp}   legge la formazione
+POST /gaming/v1/teamLineup/A                       la salva
+```
+
+La strategia e' **leggi, modifica, riscrivi**: si parte dall'oggetto che il
+sito restituisce e si sostituiscono solo titolari, panchina e modulo. Campi
+come `mday` e `cmday`, la cui semantica non e' ovvia, vengono rimandati
+indietro come sono invece di essere ricostruiti a intuito.
+
+Il motivo non e' la velocita' ma la **correttezza**. Cliccando sui nomi l'app
+ricomponeva una formazione sua: un run poteva concludersi con successo avendo
+salvato un 4-3-3 al posto del 5-3-2 calcolato, senza che nulla lo segnalasse.
+Con l'API il modulo e gli undici si scrivono in modo esplicito e si rileggono
+dalla risposta per verificarli — se il salvato non corrisponde, il run
+fallisce invece di mentire.
+
+L'automazione del browser resta come **ripiego**: se l'API risponde in modo
+inatteso (e' privata e non documentata, puo' cambiare) il run non si ferma, ci
+passa da sola e lo scrive nel log. Per escluderla del tutto:
+`league.use_api: false`.
+
 ### Se il run rimbalza sul login
 
 `www.fantacalcio.it` e `leghe.fantacalcio.it` sono due applicazioni diverse: un
