@@ -386,3 +386,34 @@ class TestSelettoriConAttributo:
         assert _first_value(riga, ["div.role", "[data-role]@data-role"]) == "A"
         assert _first_value(riga, ["span.truncate"]) == "Camarda"
         assert _first_value(riga, ["span.assente"]) == ""
+
+
+class TestConfermaSalvataggio:
+    """L'app e' ng-zorro: le notifiche non sono i `.alert-success` di Bootstrap."""
+
+    def test_copre_le_notifiche_di_ng_zorro(self, selectors):
+        conferme = " ".join(selectors["formazione"]["save_confirmation"])
+        assert "ant-message" in conferme
+        assert "ant-notification" in conferme
+
+    def test_i_candidati_specifici_vengono_prima(self, selectors):
+        conferme = selectors["formazione"]["save_confirmation"]
+        assert conferme[0] == ".ant-message-success"
+        assert conferme.index(".ant-message-success") < conferme.index(".alert-success")
+
+    def test_il_fallimento_produce_la_diagnostica(self):
+        import inspect
+
+        from fantabot.lega.client import LeagueClient
+
+        sorgente = inspect.getsource(LeagueClient.submit_lineup)
+        assert "_save_diagnostics" in sorgente
+
+    def test_il_messaggio_dice_che_potrebbe_essere_salvata(self):
+        """Non sapere non e' come sapere che non e' andata: va detto."""
+        import inspect
+
+        from fantabot.lega.client import LeagueClient
+
+        sorgente = inspect.getsource(LeagueClient.submit_lineup)
+        assert "potrebbe essere comunque stata salvata" in sorgente

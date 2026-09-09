@@ -627,9 +627,16 @@ class LeagueClient:
         confirmed = self._any_visible(cfg.get("save_confirmation", []))
         self.save_artifacts("post-salvataggio")
         if not confirmed:
+            # La formazione potrebbe essere stata salvata lo stesso: qui non
+            # sappiamo, ed e' proprio l'incertezza il problema. La diagnostica
+            # dice cosa e' comparso davvero a schermo, cosi' la conferma si
+            # riconosce al giro dopo invece di restare un dubbio.
+            report = self._save_diagnostics("post-salvataggio")
+            dove = f" Diagnostica in {report}." if report else ""
             raise LeagueError(
-                "salvataggio inviato ma nessuna conferma trovata a schermo: "
-                "verifica manualmente sul sito."
+                "salvataggio inviato ma nessuna conferma trovata a schermo. "
+                "La formazione potrebbe essere comunque stata salvata: "
+                f"verifica sul sito.{dove}"
             )
         return f"formazione {lineup.module} salvata e confermata dal sito"
 
