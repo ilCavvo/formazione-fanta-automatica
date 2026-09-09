@@ -83,3 +83,24 @@ def test_alias_map_load_dal_repo(tmp_path):
 
 def test_alias_map_file_mancante_non_esplode():
     assert AliasMap.load("/percorso/che/non/esiste.yaml").players == {}
+
+
+class TestRosaSenzaSquadra:
+    """Sulla pagina della lega la squadra di un infortunato non e' mostrata.
+
+    Senza un ripiego quei giocatori non verrebbero mai riconosciuti dalle
+    fonti, che invece la squadra ce l'hanno sempre.
+    """
+
+    def test_giocatore_senza_squadra_viene_trovato(self):
+        matcher = PlayerMatcher([("McTominay", "")])
+        assert matcher.match("McTominay S.", "Napoli") == ("McTominay", "")
+
+    def test_il_ripiego_non_confonde_gli_omonimi_con_squadra(self):
+        matcher = PlayerMatcher([("Cambiaso", "Juventus")])
+        assert matcher.match("Cambiaso", "Milan") is None
+
+    def test_rosa_mista(self):
+        matcher = PlayerMatcher([("Cambiaso", "Juventus"), ("McTominay", "")])
+        assert matcher.match("Cambiaso", "Juventus") == ("Cambiaso", "Juventus")
+        assert matcher.match("McTominay", "Napoli") == ("McTominay", "")
