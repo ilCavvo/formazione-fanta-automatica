@@ -135,6 +135,17 @@ sources:
     infortunati_url: "https://www.fantacalcio.it/infortunati-serie-a"
     squalificati_url: "https://www.fantacalcio.it/squalificati-e-diffidati-campionato-serie-a"
 
+# --- Statistiche di Serie A -------------------------------------------------
+# Due sole pagine, sullo stesso host delle probabili. Servono a sapere CHI si
+# affronta e COME sta andando un giocatore. Se una delle due non risponde il
+# run prosegue: sono contributi al punteggio, non requisiti.
+statistiche:
+  enabled: true
+  # Gol fatti/subiti, partite giocate e forma recente di ogni squadra.
+  classifica_url: "https://www.fantacalcio.it/serie-a/classifica"
+  # Per ogni giocatore di Serie A: PV, MV, FM, gol, assist, ammonizioni...
+  statistiche_url: "https://www.fantacalcio.it/statistiche-serie-a"
+
 # --- Aggregazione delle probabili ------------------------------------------
 aggregation:
   # Come si trasforma il verdetto di una fonte in un voto:
@@ -174,10 +185,58 @@ lineup:
     probabilita: 25.0
     # Quanto pesa l'accordo tra le fonti (0-1 * peso).
     consenso: 15.0
-    # Quanto pesa la fantamedia stagionale, se disponibile.
-    fantamedia: 8.0
     # Spinta minima per rispettare l'ordine della tua rosa a parita' di tutto.
     ordine_rosa: 0.5
+
+    # -- Chi si affronta ------------------------------------------------------
+    # Quanto conta la squadra avversaria, per ruolo. Il metro cambia col ruolo:
+    # portiere e difensori sono misurati sull'ATTACCO avversario (piu' gol fa,
+    # meno valgono), centrocampisti e attaccanti sulla sua DIFESA (piu' gol
+    # incassa, piu' valgono). In entrambi i casi: avversario forte, punteggio
+    # minore.
+    # Il portiere ha il peso piu' alto perche' subisce l'attacco per intero e
+    # non ha bonus con cui rifarsi. Metti 0 a un ruolo per spegnerlo.
+    avversario:
+      P: 10.0
+      D: 5.0
+      C: 3.0
+      A: 4.0
+    # Tutto e' misurato come scarto dalla media del campionato, cosi' un
+    # avversario nella norma non sposta niente. Questo e' lo scarto massimo
+    # considerato: a inizio stagione bastano tre partite per produrre medie
+    # che non significano nulla, e senza un tetto dominerebbero il calcolo.
+    max_scarto_avversario: 1.5
+    # Forma recente (punti per partita nelle ultime, dalla classifica).
+    forma_squadra: 4.0      # la mia squadra in forma spinge il giocatore
+    # L'avversario in forma frena. Segue lo stesso dosaggio per ruolo dei pesi
+    # qui sopra: altrimenti peserebbe uguale su tutti e cancellerebbe la
+    # distinzione fra il portiere e gli altri.
+    forma_avversario: 3.0
+
+    # -- Come sta andando il giocatore ---------------------------------------
+    # Media voto, misurata sulla sufficienza: il 6 e' il punto neutro.
+    media_voto: 12.0
+    # Bonus e malus medi a partita. Si ricavano come fantamedia meno media
+    # voto: quella differenza E' gia' il saldo dei bonus, calcolato dal sito
+    # col regolamento vero, senza doverne indovinare i valori.
+    # La fantamedia non ha un peso suo perche' e' la somma dei due qui sopra:
+    # pesarla di nuovo vorrebbe dire contare due volte le stesse partite.
+    bonus: 14.0
+    max_scarto_bonus: 2.5
+    # Sotto questo numero di partite giocate le medie sono rumore e non si
+    # usano: ne' per il giocatore, ne' per la squadra avversaria.
+    min_partite: 2
+    # Tetto complessivo di TUTTI i contributi statistici messi insieme.
+    # 0 = nessun tetto, ed e' il default: un giocatore forte che gioca sempre
+    # deve poter battere un titolare scarso anche quando le probabili lo danno
+    # in panchina. Con i pesi qui sopra serve un divario estremo, quindi
+    # succede di rado — che e' l'intenzione.
+    # Attenzione: questo NON riguarda gli indisponibili. Infortunati e
+    # squalificati sono esclusi prima del punteggio, quindi nessuna statistica
+    # per quanto buona puo' rimetterli in campo.
+    # Se un giorno vuoi che le probabili comandino sempre, metti qui un numero
+    # sotto la meta' della distanza titolare-dubbio (55/2 = 27).
+    max_totale_statistiche: 0.0
 
   penalties:
     # Malus se la squadra del giocatore non gioca in questa giornata (riposo,
@@ -204,9 +263,15 @@ lineup:
   # completa comunque con i migliori disponibili invece di fallire.
   allow_incomplete_lineup: true
 
-  # Ordina la panchina per ruolo secondo le regole della lega (di solito il
-  # subentro e' per ruolo). "per_ruolo_poi_punteggio" oppure "solo_punteggio".
-  bench_strategy: "per_ruolo_poi_punteggio"
+  # Ordine della panchina, cioe' l'ordine in cui si prova il subentro.
+  #   punteggio_portieri_in_fondo  dal punteggio piu' alto al piu' basso, con
+  #                                i portieri sempre in coda (default)
+  #   solo_punteggio               punteggio puro, portieri compresi
+  #   per_ruolo_poi_punteggio      raggruppata per ruolo P, D, C, A
+  # Il default tiene i portieri in fondo perche' una riserva fra i pali serve
+  # solo nel caso raro in cui il titolare non giochi: davanti deve stare chi
+  # puo' entrare davvero.
+  bench_strategy: "punteggio_portieri_in_fondo"
 
 # --- Deadline della giornata ------------------------------------------------
 deadline:

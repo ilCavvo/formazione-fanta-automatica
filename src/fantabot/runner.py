@@ -31,6 +31,7 @@ from fantabot.names import AliasMap, resolve_team
 from fantabot.notify import TelegramNotifier
 from fantabot.sources import REGISTRY, SourceContext
 from fantabot.sources.unavailability import UnavailabilityFeed, Unavailable
+from fantabot.stats import StatsBook, build_form_guide, fetch_stats
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,31 @@ def _resolve_roster_teams(
         log.warning("sigle non riconosciute fra le squadre di giornata: %s",
                     ", ".join(sorted(non_risolti)))
     return risolti
+
+
+def _with_fantamedia(roster: list[RosterPlayer], guide) -> list[RosterPlayer]:
+    """Porta la fantamedia dalle statistiche dentro la rosa.
+
+    La pagina della lega non la espone, quindi finora il criterio di spareggio
+    "fantamedia" non aveva mai un numero su cui lavorare: era configurato e
+    silenziosamente inerte.
+    """
+    if not guide:
+        return roster
+
+    arricchiti: list[RosterPlayer] = []
+    trovate = 0
+    for player in roster:
+        stat = guide.stats_for(player.name)
+        if stat is None or stat.fantamedia is None or player.fantamedia is not None:
+            arricchiti.append(player)
+            continue
+        arricchiti.append(replace(player, fantamedia=stat.fantamedia))
+        trovate += 1
+
+    if trovate:
+        log.info("fantamedia trovata per %d giocatori della rosa", trovate)
+    return arricchiti
 
 
 class RunAborted(RuntimeError):
@@ -163,7 +189,7 @@ class Runner:
             )
             roster = _resolve_roster_teams(roster, matchday.teams, aliases)
 
-            reports, unavailable = self._collect_sources(raw_dir)
+            reports, unavailable, stats = self._collect_sources(raw_dir)
             result.sources = reports
 
             healthy = [r for r in reports if r.ok]
@@ -173,6 +199,12 @@ class Runner:
                 raise RuntimeError(
                     f"solo {len(healthy)} fonti disponibili su {min_sources} richieste: {names}"
                 )
+
+            guide = build_form_guide(stats, matchday=matchday, roster=roster,
+                                     aliases=aliases)
+            if stats.errors:
+                log.warning("statistiche parziali: %s", "; ".join(stats.errors))
+            roster = _with_fantamedia(roster, guide)
 
             verdicts = Aggregator(
                 settings=AggregationSettings.from_config(self.cfg),
@@ -187,7 +219,7 @@ class Runner:
                 teams_playing=matchday.teams if matchday.teams else None,
             )
 
-            lineup = build_lineup(verdicts, LineupSettings.from_config(self.cfg))
+            lineup = build_lineup(verdicts, LineupSettings.from_config(self.cfg), guide)
             result.lineup = lineup
             log.info("formazione scelta: %s", lineup.module)
 
@@ -248,9 +280,10 @@ class Runner:
 
     def _collect_sources(
         self, raw_dir: Path | None
-    ) -> tuple[list[SourceReport], list[Unavailable]]:
+    ) -> tuple[list[SourceReport], list[Unavailable], StatsBook]:
         reports: list[SourceReport] = []
         unavailable: list[Unavailable] = []
+        stats = StatsBook()
 
         with client_from_config(self.cfg, cache_dir=Path(".cache-http")) as client:
             ctx = SourceContext(client=client, config=self.cfg, raw_dir=raw_dir)
@@ -268,7 +301,20 @@ class Runner:
                 except Exception as exc:  # noqa: BLE001 - non blocca il run
                     log.warning("elenco indisponibili non disponibile: %s", exc)
 
-        return reports, unavailable
+            if self.cfg.get("statistiche.enabled", True):
+                # Due richieste sole, sullo stesso client gentile delle fonti.
+                stats = fetch_stats(
+                    client,
+                    classifica_url=str(self.cfg.get(
+                        "statistiche.classifica_url",
+                        "https://www.fantacalcio.it/serie-a/classifica")),
+                    statistiche_url=str(self.cfg.get(
+                        "statistiche.statistiche_url",
+                        "https://www.fantacalcio.it/statistiche-serie-a")),
+                    save_raw=ctx.save_raw,
+                )
+
+        return reports, unavailable, stats
 
     def _source_weights(self) -> dict[str, float]:
         """Pesi per etichetta di fonte (le fonti votano con la loro `label`)."""
